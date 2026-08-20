@@ -48,6 +48,20 @@ const PHASE_CHAR: u32 = 4u;
 
 const ST_FLAMING: u32 = 0u;
 const ST_EVER_IGNITED: u32 = 1u;
+// Crown fuel, remaining and initial, as dry DENSITY summed over voxels x CROWN_MASS_SCALE.
+//
+// A count of flaming voxels cannot answer "what fraction of the crown burned": voxels are not
+// equal and Van Wagner's CFB is a mass fraction. These two make the measured answer available,
+// which `vanWagner.ts` has always preferred over its own curve (`measuredCrownConsumedFraction`)
+// and never once been given — so every crown fire this project has ever reported was the
+// empirical nomogram narrating over a 3D canopy that was not consulted.
+//
+// Density, not mass, because every voxel has the same volume: it cancels in the ratio, so
+// carrying it would only add a way to get the units wrong.
+//
+// Fixed point because WGSL has no f32 atomics.
+const ST_CROWN_DRY: u32 = 2u;
+const ST_CROWN_INITIAL: u32 = 3u;
 
 // Irradiance is stored in kW m^-2 (f16 tops out at 65504 and a flame sheet is 117600 W m^-2).
 const KW_TO_W: f32 = 1000.0;
@@ -290,6 +304,13 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
     atomicAdd(&voxelStats[ST_EVER_IGNITED], 1u);
   }
 
+  // Crown fuel budget. `initialDry` is the voxel's dry density as voxelised, and `dryMass` is
+  // what is left of it — their ratio over the whole canopy is the measured crown consumed
+  // fraction. Accumulated every step for every occupied voxel, so it costs two atomics on a
+  // pass that is already running.
+  atomicAdd(&voxelStats[ST_CROWN_DRY], u32(max(dryMass, 0.0) * CROWN_MASS_SCALE));
+  atomicAdd(&voxelStats[ST_CROWN_INITIAL], u32(max(initialDry, 0.0) * CROWN_MASS_SCALE));
+
   // --- Write back ----------------------------------------------------------
   // f16 saturates at 65504 and temperature never approaches it, but a NaN here would poison
   // the voxel permanently, so clamp to a physical band rather than trusting the arithmetic.
@@ -306,4 +327,6 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
 fn clearStats() {
   atomicStore(&voxelStats[ST_FLAMING], 0u);
   atomicStore(&voxelStats[ST_EVER_IGNITED], 0u);
+  atomicStore(&voxelStats[ST_CROWN_DRY], 0u);
+  atomicStore(&voxelStats[ST_CROWN_INITIAL], 0u);
 }

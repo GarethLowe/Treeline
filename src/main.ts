@@ -513,6 +513,9 @@ function stepFire(dt: Seconds): void {
     // phase so the two costs can be told apart. It reads the fields WP 2.4 has just written,
     // so it must follow the surface step within the encoder, never precede it.
     canopy?.step(rt === null ? encoder : attributeEncoder(encoder, rt.profiler, 'canopy'), dt, f.outputs)
+    // The canopy's own answer to "how much of the crown burned", one readback behind. Van
+    // Wagner's curve is only the fallback now.
+    if (canopy !== null) f.setMeasuredCrownConsumed(canopy.crownConsumedFraction)
     // `fluid` is the profiler phase spec §6.3 reserves for advected fields. It reads the
     // surface arrival times WP 2.4 has just resolved, so it follows both.
     smoke?.step(

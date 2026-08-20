@@ -19,6 +19,7 @@
  * catch. Both are easy to get wrong by writing `step()` once and calling everything from it.
  */
 
+import { DOMAIN_SIZE_M } from '@contracts/world'
 import type { Seconds } from '@contracts/units'
 import { m as metres, kWm } from '@contracts/units'
 import type { ITerrainField, IVegetationSet, SpeciesDef } from '@contracts/world'
@@ -86,6 +87,17 @@ export class CanopySim {
   /** Flaming and ever-ignited voxel counts, one readback behind. The M3 acceptance number. */
   flamingVoxels = 0
   everIgnitedVoxels = 0
+  /**
+   * Fraction of crown fuel consumed, MEASURED from the voxel field rather than inferred from
+   * a spread rate. `vanWagner.ts` prefers this over its own CFB curve and has never had it.
+   * Null until the first readback lands, so "not measured yet" stays distinguishable from
+   * "measured zero" — those are different states and only one of them is a bug.
+   */
+  crownConsumedFraction: number | null = null
+  private burntAreaM2 = 0
+  /** Domain-wide crown fuel totals from the last readback, dry density x scale. */
+  private crownDryRaw = 0
+  private crownInitialRaw = 0
 
   private readonly device: GPUDevice
   private readonly brickList: GPUBuffer
@@ -167,7 +179,7 @@ export class CanopySim {
 
     this.statsStaging = device.createBuffer({
       label: 'canopy.voxelStats.staging',
-      size: 8,
+      size: 16,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     })
 
@@ -257,6 +269,7 @@ export class CanopySim {
   step(encoder: GPUCommandEncoder, dt: Seconds, surface: IFireOutputs): void {
     this.readStats()
     this.surfaceState = surface.stateTexture
+    this.burntAreaM2 = surface.burntAreaM2
     this.simTimeS += dt
 
     if (this.simTimeS >= this.nextRadiationS) {
@@ -283,7 +296,7 @@ export class CanopySim {
     this.firebrands.step(encoder, dt, surface)
 
     if (!this.readingBack) {
-      encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, 8)
+      encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, 16)
       this.copyPending = true
     }
   }
@@ -418,6 +431,33 @@ export class CanopySim {
   }
 
   /**
+   * Crown fraction burned, measured — but normalised to the fire's OWN footprint.
+   *
+   * The voxel accumulators are domain-wide, and Van Wagner's CFB is not: it is the fraction of
+   * crown fuel consumed *where the fire has been*. Dividing consumed mass by the whole
+   * landscape's crown mass reports ~0 % for any fire smaller than the domain, which is the
+   * arithmetic of a 0.1 ha burn in 104 ha, not a statement about crown fire.
+   *
+   * So the denominator is scaled by the burnt fraction of the domain. **That assumes the
+   * canopy is spatially uniform** — true enough for a procedurally placed stand at constant
+   * density, and stated rather than hidden. A patchy canopy makes this noisy at small burn
+   * areas, which is why it returns null until the fire has covered enough ground to mean
+   * anything.
+   */
+  private computeCrownConsumed(): number | null {
+    if (this.crownInitialRaw <= 0) return null
+    // Below this the denominator is a handful of voxels and the ratio is noise.
+    const MIN_BURNT_M2 = 200
+    if (this.burntAreaM2 < MIN_BURNT_M2) return null
+    const domainM2 = (DOMAIN_SIZE_M as number) ** 2
+    const burntFraction = Math.min(1, this.burntAreaM2 / domainM2)
+    const consumed = Math.max(0, this.crownInitialRaw - this.crownDryRaw)
+    const inFootprint = this.crownInitialRaw * burntFraction
+    if (inFootprint <= 0) return null
+    return Math.min(1, consumed / inFootprint)
+  }
+
+  /**
    * Pull the voxel counters back, one step behind.
    *
    * Same `copyPending` handshake as `FireOutputs.readAggregates`, and for the same reason: map
@@ -435,6 +475,9 @@ export class CanopySim {
         this.statsStaging.unmap()
         this.flamingVoxels = raw[0] ?? 0
         this.everIgnitedVoxels = raw[1] ?? 0
+        this.crownDryRaw = raw[2] ?? 0
+        this.crownInitialRaw = raw[3] ?? 0
+        this.crownConsumedFraction = this.computeCrownConsumed()
       })
       .finally(() => {
         this.readingBack = false

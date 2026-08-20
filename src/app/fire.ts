@@ -375,24 +375,41 @@ export class FireSim {
    * evaluated once per HUD update from the cached surface prediction rather than per step.
    *
    * `crownRos` is handed the surface rate of spread: before crowning starts that is what the
-   * front is doing, and the 3D canopy solver that would supersede it is not wired (see the
-   * integrator's report). `measuredCrownConsumedFraction` is deliberately NOT supplied, so
-   * `crownFractionBurnedIsDiagnostic` comes back true and the HUD can say the CFB is the Van
-   * Wagner stand-in rather than a measurement of the voxel field.
+   * front is doing.
+   *
+   * **`measuredCrownConsumedFraction` now comes from the voxel field** when the canopy solver
+   * has reported one. Until it did, every crown fire this project described was Van Wagner's
+   * empirical curve narrating over a 3D canopy nobody asked — the two can disagree completely,
+   * and when they do the measurement is the answer and the divergence is the finding.
+   * `crownFractionBurnedIsDiagnostic` still distinguishes the two in the HUD.
    */
   get crown(): CrownFireResult | null {
     const stand = this.#stand
     if (stand === null) return null
     if (this.#crown === null) {
       const p = this.predicted
+      const measured = this.#measuredCrownConsumed
       this.#crown = evaluateCrownFire({
         stand,
         surfaceIntensity: p.firelineIntensity,
         surfaceRos: p.rateOfSpread,
         crownRos: p.rateOfSpread,
+        ...(measured === null ? {} : { measuredCrownConsumedFraction: measured }),
       })
     }
     return this.#crown
+  }
+
+  #measuredCrownConsumed: number | null = null
+
+  /**
+   * Hand the crown model the canopy's own answer. Called by the composition layer once the
+   * voxel readback lands; invalidates the cached evaluation so the next HUD update uses it.
+   */
+  setMeasuredCrownConsumed(fraction: number | null): void {
+    if (fraction === this.#measuredCrownConsumed) return
+    this.#measuredCrownConsumed = fraction
+    this.#crown = null
   }
 
   /**

@@ -92,6 +92,8 @@ export function buildVoxelStepShader(
     canopyStorageWgsl(VOXEL_GROUP_STORAGE),
     radiationPrelude(opts),
     kineticsPrelude(),
+    // One definition of the fixed-point scale, generated rather than repeated in the WGSL.
+    `const CROWN_MASS_SCALE: f32 = ${CROWN_MASS_SCALE.toFixed(1)};`,
     CONVECTION_WGSL,
     VOXEL_STEP_WGSL,
   ].join('\n')
@@ -141,7 +143,17 @@ export interface VoxelStepResources {
 }
 
 const PARAMS_BYTES = 16
-const STAT_SLOTS = 2
+/**
+ * Fixed-point scale for the crown-fuel accumulators, shared with `voxel_step.wgsl`.
+ *
+ * Dry densities are order 0.1-1 kg/m3 and a large canopy has ~1.2 M occupied voxels, so the
+ * sum reaches ~1e6 before scaling. 64 keeps it two orders of magnitude clear of u32 overflow
+ * while resolving far finer than the field itself is known to.
+ */
+export const CROWN_MASS_SCALE = 64
+
+/** flaming, everIgnited, crownDry, crownInitial. */
+const STAT_SLOTS = 4
 const WORKGROUP = 64
 
 export class CanopyVoxelStep {
