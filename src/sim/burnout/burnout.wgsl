@@ -185,7 +185,15 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
   // kW m^-1. R is the rate the front was moving AT THIS CELL as it passed, which is why
   // WP 2.3 has to capture it: it is gone by the next substep.
   let ros = max(textureLoad(rosSrc, coord, 0).x, 0.0);
-  let intensity = select(0.0, params.reactionIntensity * model.residenceTime * ros, arrival < ARRIVAL_NEVER);
+
+  // Byram's I is a property of the FLAMING FRONT, so it is gated on the cell still being
+  // within its flaming residence window — the same test the state enum uses below. Gating it
+  // only on "the fire ever arrived here" latched every burnt cell at its arrival intensity
+  // for the rest of the run. That is not just a wrong picture: `emit_surface.wgsl` builds the
+  // canopy's radiant panels from this texture, so cells that stopped burning minutes ago were
+  // still heating the crowns above them, and Van Wagner crown initiation reads it too.
+  let flaming = arrival <= params.now && (params.now - arrival) < model.residenceTime;
+  let intensity = select(0.0, params.reactionIntensity * model.residenceTime * ros, flaming);
 
   textureStore(intensityTex, coord, vec4<f32>(intensity, 0.0, 0.0, 0.0));
   atomicMax(&aggregates[AGG_MAX_INTENSITY_BITS], bitcast<u32>(max(intensity, 0.0)));

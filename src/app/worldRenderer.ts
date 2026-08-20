@@ -51,6 +51,7 @@ import { DEFAULT_FOLIAGE_CONFIG, DEFAULT_GRASS, type FoliageConfig } from '@rend
 import { SkyRenderer } from '@render/sky/sky-renderer.ts'
 import { EnvironmentLighting } from '@render/sky/environment.ts'
 import { createOcclusionTexture, SunOcclusion } from '@render/shadow/sunOcclusion.ts'
+import { FlameRenderer } from '@render/flames/flameRenderer.ts'
 import { DEPTH_CLEAR_VALUE, DEPTH_COMPARE, DEPTH_FORMAT } from '../camera/math.ts'
 import { HDR_FORMAT, RenderTargets, ResolvePass } from './resolvePass.ts'
 import { TerrainPass } from './terrainPass.ts'
@@ -136,7 +137,11 @@ export class WorldRenderer {
   readonly terrainPass: TerrainPass
   /** Phase 3 rung 1. Rebuilt only when the sun moves; see `render/shadow/sunOcclusion.ts`. */
   readonly sunOcclusion: SunOcclusion
+
   readonly targets: RenderTargets
+
+  /** WP 4.5's flames. Null until {@link attachFire} — they read the solver's own textures. */
+  flames: FlameRenderer | null = null
 
   /** WP 2.6's provisional overlay. Null until {@link attachFireDebug}; deleted when M4 lands. */
   fireDebug: FireDebugView | null = null
@@ -290,8 +295,18 @@ export class WorldRenderer {
    * Separate from {@link attachFireDebug} deliberately: that overlay is optional and off by
    * default, and burning vegetation must not depend on a debug view being switched on.
    */
-  attachFire(outputs: IFireOutputs): void {
+  async attachFire(outputs: IFireOutputs): Promise<void> {
     this.foliageRenderer.attachFire(outputs.consumedTexture, outputs.intensityTexture)
+    this.flames?.destroy()
+    this.flames = await FlameRenderer.create({
+      device: this.#device,
+      stateTexture: outputs.stateTexture,
+      intensityTexture: outputs.intensityTexture,
+      heightTexture: this.#world.terrain.heightTexture,
+      colorFormat: HDR_FORMAT,
+      depthFormat: DEPTH_FORMAT,
+      depthCompare: DEPTH_COMPARE,
+    })
   }
 
   async attachFireDebug(outputs: IFireOutputs, view: FireDebugViewId): Promise<void> {
@@ -389,6 +404,27 @@ export class WorldRenderer {
     this.foliageRenderer.updateBurnState(timed)
     encoder.popDebugGroup()
 
+    // Rebuild the flame billboard list from the solver's state texture. Before the world
+    // pass, which is where they are drawn.
+    if (this.flames !== null) {
+      encoder.pushDebugGroup('flames.gather')
+      this.flames.gather(timed, {
+        viewProj: camera.viewProjMatrix as Float32Array,
+        cameraPos: [
+          camera.position[0] as number,
+          camera.position[1] as number,
+          camera.position[2] as number,
+        ],
+        // Same clock and wind the foliage sway uses, so a flame leans the way the grass
+        // beside it does rather than telling a different story about the same wind.
+        timeSec: inputs.fire?.simTimeS ?? 0,
+        windDirX: Math.sin(this.foliageRenderer.windDirectionRad),
+        windDirZ: Math.cos(this.foliageRenderer.windDirectionRad),
+        windSpeed: this.foliageRenderer.windSpeedMps,
+      })
+      encoder.popDebugGroup()
+    }
+
     encoder.pushDebugGroup('foliage.cull')
     this.foliageRenderer.cull(timed, camera, quality)
     encoder.popDebugGroup()
@@ -434,6 +470,9 @@ export class WorldRenderer {
         this.skyRenderer.render(pass, camera, solar)
         this.terrainPass.draw(pass)
         this.foliageRenderer.draw(pass, camera, quality)
+        // Flames before the overlay and after the geometry: additive, depth-tested against
+        // what the terrain and foliage wrote, writing no depth of its own.
+        this.flames?.draw(pass)
         // Last in the pass: it is alpha-blended, reads the depth the terrain and foliage
         // wrote and writes none of its own, so it can only ever tint what is already there.
         if (this.fireDebug !== null && inputs.fire !== undefined) {

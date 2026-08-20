@@ -125,6 +125,7 @@ npm test              # full suite
 npm run validate      # fire behaviour against published data, with per-case deviation
 npm run spec:status   # regenerate the open-questions dashboard from the spec documents
 npm run dev           # http://127.0.0.1:5173  ·  ?debug for smoke test  ·  ?bench for timings
+npm run headless      # drive a real Chrome unattended: screenshots, console, GPU errors
 ```
 
 **Tests do not touch a GPU.** Vitest runs under Node, which has no WebGPU, so WGSL never
@@ -132,6 +133,43 @@ reaches a compiler and every GPU-only test skips. Four real bugs shipped through
 943-test suite this way: two WGSL reserved keywords (`target`, `layout`), an sRGB texture
 view rejected for carrying storage usage, and a `requestAnimationFrame` deadlock. **A green
 suite is necessary, not sufficient — load the page before claiming something works.**
+
+## Tooling — what a fresh machine needs
+
+This project is developed on Windows. Nothing below is bundled; a new machine needs each one
+installed before the corresponding workflow works.
+
+| Tool | Needed for | If missing |
+|---|---|---|
+| **Node 22+** | everything. `scripts/headless.mjs` relies on a **global `WebSocket`**, which is Node 21+. | the runner throws `WebSocket is not defined` |
+| **Google Chrome** | `npm run headless`. Paths are probed in `CHROME_CANDIDATES` at the top of the script — add yours there if it lives elsewhere. | "no Chrome found", with the list it searched |
+| **Python 3** | `scripts/frame-stats.py` | frame statistics unavailable; screenshots still work |
+| **Pillow** (`pip install pillow`) | faster PNG decode in `frame-stats.py` | falls back to a stdlib decoder automatically — slower, same numbers |
+
+### The visual feedback loop
+
+```bash
+npm run dev                                             # terminal 1
+node scripts/headless.mjs http://127.0.0.1:5173/?hud=0 --shot frame.png
+python scripts/frame-stats.py frame.png
+```
+
+`scripts/headless.mjs` drives a real Chrome over the DevTools Protocol. **Headless Chrome
+composites**, so `requestAnimationFrame` fires and frames are genuinely produced — which is the
+one thing the in-app browser pane never does. Flags: `--wait <js>` (default: the boot screen
+hid itself, i.e. a frame rendered), `--eval <js>`, `--shot <png>`, `--timeout`, `--quiet`. It
+exits non-zero on timeout or console errors, so it works as a check and not only as a viewer.
+
+**Chrome reports invalid pipelines as console WARNINGS, and the runner captures them.** That is
+not a detail: `createRenderPipeline` does not throw on a bad bind-group layout, it returns an
+invalid pipeline, every draw using it is dropped, and the screen goes black with a green test
+suite and an empty `gpuErrors`. That exact bug shipped on 2026-08-20. `installShaderAudit` in
+`src/app/shaderAudit.ts` now wraps pipeline creation in validation error scopes unconditionally,
+so it is caught in the shipping path too.
+
+**Its results are functional, not temporal.** The adapter Chrome picks here is the Intel iGPU,
+so the runner prints the adapter every run and every frame time from it is ~10x off. Real
+numbers still need the owner's own Chrome.
 
 ## Environment
 
@@ -142,5 +180,6 @@ suite is necessary, not sufficient — load the page before claiming something w
   need the owner's own Chrome.
 - The preview pane may not composite, in which case `requestAnimationFrame` never fires and
   no frame renders. Boot completes anyway and reports "First frame — skipped".
-- `.claude/launch.json` calls `node.exe` by absolute path because the session PATH predates
-  the Node install.
+- `.claude/launch.json` calls `node.exe` by **absolute path** because the session PATH predates
+  the Node install. **This is machine-specific and will not survive a move** — fix the path
+  there first on a new machine, or replace it with plain `node` if the PATH is sane.

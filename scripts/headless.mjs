@@ -47,7 +47,10 @@ const CHROME_CANDIDATES = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 ]
 
-const PORT = 9333
+// Per-process port. A fixed one silently ATTACHES TO A STALE BROWSER when a previous run has
+// not exited yet — which shows up as "NO ADAPTER" and a timeout, i.e. looking exactly like a
+// broken app rather than a broken runner.
+const PORT = 9300 + (process.pid % 600)
 
 function parseArgs(argv) {
   const out = { url: argv[0], timeout: 300_000, quiet: false }
@@ -237,6 +240,10 @@ async function main() {
     )
     .catch(() => '(query failed)')
   console.log(`adapter          ${adapter}`)
+  if (adapter === 'NO ADAPTER') {
+    console.log('  ^ Chrome gave no WebGPU adapter. That is a RUNNER problem, not an app one:')
+    console.log('    usually a stale chrome.exe still holding the GPU process. Kill it and retry.')
+  }
   console.log(`ready            ${ready}${ready ? '' : ' — TIMED OUT'}`)
 
   if (args.evaluate) {

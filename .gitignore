@@ -9,3 +9,6 @@ public/assets/materials/
 
 # Exported simulation runs
 exports/
+
+# Python bytecode from scripts/
+__pycache__/

@@ -18,6 +18,7 @@ Completed episodes — what broke and what it taught — live in [docs/HISTORY.m
 | **Cleanup phase 1** | Complete. See below for the four items skipped and why. |
 | **Cleanup phase 2** | Done. Three bugs fixed, two of them found by the first. |
 | **Cleanup phase 3** | Rung 1 (sun occlusion) in and GPU-verified. Rungs 2-4 (TAA, bloom, smoke self-shadowing) remain. |
+| **M4 — WP 4.5 flames** | In. The scene draws fire for the first time; procedural, no textures. |
 | **M4 — burning vegetation** | Trees and grass now char from the solver's own output. §7.6(c)'s 32-texel profile is still not built; see below. |
 
 Whole repo, as of 2026-08-20: **0 type errors, 1742 tests passing / 1 skipped, 51 validation
@@ -135,6 +136,64 @@ that is a surface fire blackening the base, not a crown fire.
   two bands rather than one.
 - **`burnStateIndex` is still unused.** The instance index serves as the per-stem row, so the
   field is redundant. Left in place rather than churning `INSTANCE_FLOATS` and its layout test.
+
+## WP 4.5 — near-field flames
+
+`src/render/flames/flameRenderer.ts` + `shaders/render/flames/flames.wgsl`. Before this,
+**nothing in the renderer drew fire**: WP 2.6's overlay put a false-colour stain on the ground
+and the froxel march carried the smoke, but the flame itself was absent. Neither debug view
+reads as fire — arrival is a magenta stain, intensity is pale magma — so a different colormap
+was never the answer.
+
+Two stages, reading only the public `IFireOutputs` textures so this watches the solver rather
+than duplicating it:
+
+- **`csGather`** — one thread per `FLAME_STRIDE` x `FLAME_STRIDE` block of surface cells;
+  blocks whose centre is `STATE_BURNING` append a billboard. Scanning at a stride is what makes
+  it cheap: the surface grid is 2048² = 4.2 M cells and a metre of burning ground does not need
+  four flames on it. Overflow past `MAX_FLAMES` is **dropped and counted, never wrapped** —
+  wrapping would overwrite live flames and thin the front with no indication. `?debug` prints
+  the count.
+- **`vsFlame`/`fsFlame`** — instanced quads, billboarded about the vertical axis only (a flame
+  stands up; a spherical billboard shears into the ground when you look down at it), leaning
+  downwind, additively blended and depth-tested but not depth-writing.
+
+**No textures, and no new constants.** The shape is procedural noise; the colour is the
+blackbody LUT from `render/volumetrics/blackbody.ts`, `validated` against CIE illuminant A; the
+base temperature is `DEFAULT_FLAME_TEMPERATURE_K` (1200 K, §7.4) passed in from the radiation
+package rather than repeated; the height is Byram flame length. A flame here is the same
+physics as the glow the froxel march emits.
+
+`test/render/flames/flames.test.ts` pins the flame-length relation across all **three** places
+it now lives — the CPU kernel, `burnShade.wgsl` and `flames.wgsl`. Three copies is one more
+than comfortable and WGSL never reaches a compiler under Node.
+
+### Known limits
+
+- Each billboard is independent: flames do not lean into each other or merge, and there is no
+  vorticity. §7.4's flame *sheet* is what the radiation package models for heat transfer; this
+  is its visible counterpart, not a fluid solve.
+- **Flames do not light anything.** Fire lighting the scene is WP 4.4 and still unbuilt, so a
+  night fire illuminates no grass and casts no light on trunks. This is the next obvious gap.
+- No bloom, so the brightest cores clamp flat at the ACES shoulder — Phase 3 rung 3.
+
+## Fireline intensity latched after burnout — fixed
+
+Found by looking at the intensity debug view through the headless runner: the burnt interior
+was *brighter* than the advancing edge. A fireline is a ring, not a disc.
+
+`burnout.wgsl` gated the intensity write on `arrival < ARRIVAL_NEVER` — "the fire ever reached
+this cell" — so every cell latched at its arrival intensity for the rest of the run. The state
+enum three lines below already had the right test (`dt < model.residenceTime`); the intensity
+write just never used it. Byram's I is a property of the flaming front.
+
+**This was not only cosmetic.** `emit_surface.wgsl` builds the canopy's radiant panels from
+this texture, so cells that stopped burning minutes earlier were still heating the crowns above
+them, and Van Wagner crown initiation reads the same field. The M3 probe's "irradiance peak
+5.93 kW/m2 over 3826/4096 cells" was measured under the old behaviour — **re-measure it**, the
+irradiated fraction should fall a long way.
+
+Tests and validation stayed green across the change (1763 / 51).
 
 ## The headless runner — `npm run headless` (CLEANUP-SPEC 1.11, now closed)
 

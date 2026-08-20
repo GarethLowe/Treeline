@@ -43,6 +43,7 @@ import {
 } from './camera/math.ts'
 import { BootScreen } from './app/bootScreen.ts'
 import { installShaderAudit, pipelineErrors, shaderAuditReport } from './app/shaderAudit.ts'
+import { FLAME_STRIDE, MAX_FLAMES } from '@render/flames/flameRenderer.ts'
 import { adaptExposure, autoExposure } from './app/exposure.ts'
 import { StageTracker } from './app/stages.ts'
 import { DEFAULT_SETTINGS, searchFromSettings, settingsFromSearch, type AppSettings } from './app/settings.ts'
@@ -266,7 +267,7 @@ async function build(stages: StageTracker): Promise<void> {
   // it entirely; M4's volumetrics replaces it.
   // Before the overlay, and unconditionally: vegetation chars from the solver's own output,
   // not from a debug view.
-  renderer.attachFire(fire.outputs)
+  await renderer.attachFire(fire.outputs)
 
   if (settings.fireView !== 'off') {
     await renderer.attachFireDebug(fire.outputs, asFireView(settings.fireView))
@@ -305,6 +306,16 @@ async function build(stages: StageTracker): Promise<void> {
     } catch (err) {
       boot.appendBlock('M3 canopy chain probe', `FAILED: ${String(err)}`)
     }
+    boot.appendBlock(
+      'Near-field flames (WP 4.5)',
+      renderer.flames === null
+        ? 'no flame renderer — attachFire did not run'
+        : [
+            `billboards        ${renderer.flames.lastFlameCount} last gathered`,
+            `capacity          ${MAX_FLAMES} (overflow is dropped and counted, never wrapped)`,
+            `stride            ${FLAME_STRIDE} surface cells per billboard`,
+          ].join(String.fromCharCode(10)),
+    )
     boot.setPhase('debug — probing vegetation burn state')
     await yieldToBrowser()
     try {
@@ -930,9 +941,19 @@ function fireHudFrame(f: FireSim): FireHudFrame {
   }
 }
 
+/**
+ * Things the renderer or the sim does NOT do, stated in the HUD so a missing effect reads as
+ * a known gap rather than a bug. **Keep this honest in both directions** — an entry that has
+ * since been built is worse than no entry at all, because it teaches the reader to ignore the
+ * list. "No cast shadows anywhere" lived here after sun occlusion shipped.
+ */
 const MISSING_OUTPUTS: readonly string[] = [
-  'no cast shadows anywhere — the only occlusion in the scene is AO baked into bark furrows,',
-  '  so sunlit and canopy-shaded ground render identically',
+  'crown fire is classified by the Van Wagner CURVE, not by the 3D canopy: the voxel',
+  '  combustion runs, but CFB is the empirical criterion, not a count of what burned',
+  'flames are drawn on the SURFACE only — nothing renders a crowning fire in the canopy,',
+  '  so a stand at CFB 94 % still shows ground flames and smoke',
+  'fire lights nothing (WP 4.4): flames are emissive but cast no light on grass or trunks',
+  'shadows are a top-down occlusion map, not cascades — no side-lit trunk shadows',
   'volumetrics have no sun-transmittance volume (spec §7.1.4), so the plume does not',
   '  self-shadow: a thick column is lit evenly instead of bright on top, dark underneath',
   'soot yield is `estimated` and scales plume opacity linearly (Andreae 2019 Table 1 unread)',

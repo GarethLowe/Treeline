@@ -717,6 +717,15 @@ export class FoliageRenderer implements IFoliageRenderer {
    * every frame with the field sampled at the camera; until then it is a synthetic constant.
    * It exists as a setter precisely so that handover does not reopen `IFoliageRenderer`.
    */
+  /** Direction the wind blows TOWARDS, radians clockwise from north (+Z). */
+  get windDirectionRad(): number {
+    return this.wind.directionRad as number
+  }
+
+  get windSpeedMps(): number {
+    return this.wind.speedMps
+  }
+
   setWind(wind: WindState): void {
     this.wind = wind
   }
