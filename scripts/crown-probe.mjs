@@ -59,13 +59,19 @@ for (const hgt of [2, 4, 8, 12, 16, 24, 32]) {
 }
 
 // On the plume axis at the crown base.
-const row = samplePlumeLut(lut, CROWN_BASE_M, 0, cfg)
+// Directly above the fire AND on the tilted centreline. The plume leans downwind, so the
+// hottest gas at crown height is NOT above the source — that offset is the whole question.
+const above = samplePlumeLut(lut, CROWN_BASE_M, 0, cfg)
+const onAxis = samplePlumeLut(lut, CROWN_BASE_M, lut[2 * 4 + 3], cfg)
+console.log(`  above source    ${above.gasTempK.toFixed(1)} K`)
+console.log(`  on centreline   ${onAxis.gasTempK.toFixed(1)} K (offset ${lut[2 * 4 + 3].toFixed(2)} m downwind)`)
+const row = onAxis
 const gasK = row.gasTempK
 const h = convectiveCoefficient({
-  gasTemperatureK: K(gasK),
-  surfaceTemperatureK: K(AMBIENT_K),
+  gasTempK: K(gasK),
+  solidTempK: K(AMBIENT_K),
   gasSpeed: row.gasSpeed,
-  diameter: PARTICLE_D,
+  diameter: m(PARTICLE_D),
 })
 
 console.log('')

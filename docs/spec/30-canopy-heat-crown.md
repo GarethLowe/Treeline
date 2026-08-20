@@ -108,7 +108,8 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 
 ### 7.5 Convection
 
-> **OPEN QUESTION (unverified):** **The plume's near field collapses, and crown initiation cannot happen because of it.** Measured with `scripts/crown-probe.mjs` for an 8011 kW/m surface fire (SB4, flame depth 4.37 m, $B_0 = 133.4$ — which matches $gQ'/(ho c_p T)$ exactly, so the source term is right):
+> **OPEN QUESTION (unverified):** **The plume's near field collapses, and crown initiation cannot happen because of it.** Measured with `scripts/crown-probe.mjs` for an 8011 kW/m surface fire (SB4, flame depth 4.37 m, $B_0 = 133.4$ — which matches $gQ'/(
+ho c_p T)$ exactly, so the source term is right):
 >
 > | z | $g'$ | $w$ | $b$ | $g'wb$ | $\Delta T_c$ |
 > |---|---|---|---|---|---|
@@ -122,6 +123,17 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 > The consequence is quantitative. At 8 m the centreline has tilted 1.37 m downwind while $b$ is 0.81 m, so a voxel **directly above the fire** sits 1.6 half-widths off-axis and receives $\exp(-1.37^2/(\lambda b)^2) pprox 0.16$ of the centreline excess — **51 K instead of 328 K**. Convection is the channel crown initiation runs on, so the 3D canopy does not ignite under any surface fire: measured max voxel 373 K against an ignition gate of 656 K, 0 flaming of 1.2 M.
 >
 > **This is why the measured crown fraction burned reads 0 % while Van Wagner's curve reads 94 % on the same fire.** The empirical criterion says this stand crowns ($I = 8011 > I_0 = 3514$ kW/m); the 3D canopy says nothing ignites. One of them is wrong and it is almost certainly this.
+>
+> **Refined by `scripts/crown-probe.mjs` after fixing its own convection call.** The model CAN ignite a crown, but only on the tilted centreline:
+>
+> | sample point at 8 m | gas |
+> |---|---|
+> | directly above the fire | 349 K |
+> | on the centreline, 1.37 m downwind | **636 K** |
+>
+> With $h = 351$ W/m²/K and the 53 kW/m² measured irradiance, a voxel on the centreline reaches its 656 K gate and **ignites at t = 172 s**. Directly above the fire it never does. The GPU's measured maximum voxel temperature is 373 K, which is the above-source gas (349 K) plus radiation — so **every heated voxel in the 3D canopy is sampling the cold side of the plume**, and none is finding the centreline. Whether that is the tilt, the sparsity of canopy directly downwind of the flaming centroid, or an `acrossM` sign error in `plumeGasStateAtWorld` is the next thing to instrument: it needs a per-voxel gas-temperature readback, which does not exist yet.
+>
+> Note also that **necking above a flame zone is real** — pool-fire plumes do it — so the collapsing $b$ is not by itself the error it first appeared to be. What IS structurally wrong is where the integration starts: Mercer & Weber (1994), *Plumes Above Line Fires in a Cross-Wind*, IJWF 4(4):201 — the model this implements — is stated to be **valid above the flaming zone**, taking width, velocity and temperature *at a height above the flame tip*. `solvePlume` starts at ground level with $w_0 = 0.1$ m/s instead. Byram flame length gives the start height and §7.4 gives the flame temperature, both already sourced here; $w_0$ then follows from buoyancy-flux conservation rather than being chosen. **That is the change to make, and it should be made against the paper.**
 >
 > A width floor $b \ge b_0$ was tried and **rejected**: it raises the 8 m gas temperature to 267 K over ambient but breaks conservation ($g'wb$ becomes 704/265/119 instead of a constant 98), i.e. it delivers more energy than the fire supplies. The right fix is a **virtual origin** placed so the similarity solution passes through the source width, which needs source conditions for a flame zone from the literature — Mercer & Weber on line-fire plumes, or Van Wagner's own convective treatment. A first estimate puts the virtual origin near 19 m, which would give only ~85 K at 8 m and still not ignite, so the discrepancy may not be the near field alone. **Obtain the source conditions before changing the initial condition.**
 
