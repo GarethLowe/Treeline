@@ -77,6 +77,17 @@ export interface FireAggregates {
   readonly burntAreaM2: number
   readonly perimeterM: number
   readonly maxFirelineIntensity: KilowattsPerMetre
+  /**
+   * Centroid of the cells flaming right now, world metres — or null when nothing is alight.
+   *
+   * The convective plume has to be anchored somewhere and was anchored to the domain centre,
+   * so a fire spreading away from that point left its own plume behind and every crown at the
+   * front read ambient gas. Null rather than a fallback: an unlit fire has no plume, and a
+   * default position here is exactly the bug.
+   */
+  readonly flamingCentroid: { readonly x: number; readonly z: number } | null
+  /** Cells flaming right now. */
+  readonly flamingCells: number
 }
 
 /**
@@ -173,6 +184,9 @@ export class FireOutputFields {
     let burnt = 0
     let edges = 0
     let maxI = 0
+    let flamingCells = 0
+    let flamingX = 0
+    let flamingZ = 0
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
         const i = y * n + x
@@ -180,6 +194,11 @@ export class FireOutputFields {
         if (intensity > maxI) maxI = intensity
         if (!this.hasArrived(i)) continue
         burnt++
+        if (this.state[i] === CELL_BURNING) {
+          flamingCells++
+          flamingX += x
+          flamingZ += y
+        }
         // Off-grid counts as unburnt, so a fire running off the domain edge still reports a
         // closed perimeter rather than silently losing that side.
         if (x === 0 || !this.hasArrived(i - 1)) edges++
@@ -192,6 +211,11 @@ export class FireOutputFields {
       burntAreaM2: burnt * cellM * cellM,
       perimeterM: edges * cellM * PERIMETER_DEBIAS,
       maxFirelineIntensity: kWm(maxI),
+      flamingCentroid:
+        flamingCells > 0
+          ? { x: (flamingX / flamingCells + 0.5) * cellM, z: (flamingZ / flamingCells + 0.5) * cellM }
+          : null,
+      flamingCells,
     }
   }
 

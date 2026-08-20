@@ -29,7 +29,7 @@ import { CanopyRadiation } from '@sim/canopy/radiation/pass.ts'
 import { SurfaceEmitterPass } from '@sim/canopy/radiation/surfaceEmitters.ts'
 import { buildBrickList, buildExtinctionField } from '@sim/canopy/radiation/build.ts'
 import { RAD_UPDATE_INTERVAL_S, MIN_RAY_COUNT, RAD_NI, RAD_NJ } from '@sim/canopy/radiation/layout.ts'
-import { CanopyVoxelStep } from '@sim/canopy/voxelStep.ts'
+import { CanopyVoxelStep, TEMP_SCALE } from '@sim/canopy/voxelStep.ts'
 import { PLUME_UNIFORM_BYTES, packPlumeUniforms } from '@sim/canopy/convection/plume.ts'
 import { buildPlumeLut, solvePlume } from '@sim/canopy/convection/plume.ts'
 
@@ -98,6 +98,10 @@ export class CanopySim {
   /** Domain-wide crown fuel totals from the last readback, dry density x scale. */
   private crownDryRaw = 0
   private crownInitialRaw = 0
+  /** Hottest canopy voxel, K. The chain's own answer to "is anything up there heating?". */
+  maxVoxelTempK = 0
+  /** Voxels at least 50 K over ambient. */
+  warmVoxels = 0
 
   private readonly device: GPUDevice
   private readonly brickList: GPUBuffer
@@ -179,7 +183,7 @@ export class CanopySim {
 
     this.statsStaging = device.createBuffer({
       label: 'canopy.voxelStats.staging',
-      size: 16,
+      size: 24,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     })
 
@@ -296,7 +300,7 @@ export class CanopySim {
     this.firebrands.step(encoder, dt, surface)
 
     if (!this.readingBack) {
-      encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, 16)
+      encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, 24)
       this.copyPending = true
     }
   }
@@ -331,7 +335,7 @@ export class CanopySim {
     }
 
     const counter = await read(this.emitters.counter, 20)
-    const stats = await read(this.voxels.stats, 8)
+    const stats = await read(this.voxels.stats, 24)
 
     // Irradiance, over a horizontal slab at the height most canopy occupies. r16float, so the
     // row pitch must reach the 256 B copy alignment.
@@ -409,6 +413,8 @@ export class CanopySim {
       `irradiance        peak ${peakKw.toFixed(2)} kW/m2 over ${lit}/4096 cells sampled at 8 m AGL`,
       `canopy voxels     ${(stats[0] ?? 0).toLocaleString()} flaming, ` +
         `${(stats[1] ?? 0).toLocaleString()} ever ignited`,
+      `  heating         max voxel ${((stats[4] ?? 0) / TEMP_SCALE).toFixed(1)} K, ` +
+        `${(stats[5] ?? 0).toLocaleString()} voxels >= 50 K over ambient`,
       '',
       emitted === 0
         ? 'NO EMITTERS — the surface fire is not flaming, or WP 2.4 wrote no intensity.'
@@ -477,6 +483,8 @@ export class CanopySim {
         this.everIgnitedVoxels = raw[1] ?? 0
         this.crownDryRaw = raw[2] ?? 0
         this.crownInitialRaw = raw[3] ?? 0
+        this.maxVoxelTempK = (raw[4] ?? 0) / TEMP_SCALE
+        this.warmVoxels = raw[5] ?? 0
         this.crownConsumedFraction = this.computeCrownConsumed()
       })
       .finally(() => {

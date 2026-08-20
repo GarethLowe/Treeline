@@ -310,7 +310,15 @@ describe('aggregates', () => {
 
   it('reports nothing for an unburnt grid', () => {
     const agg = new FireOutputFields(8).aggregate(CELL_M)
-    expect(agg).toEqual({ burntAreaM2: 0, perimeterM: 0, maxFirelineIntensity: 0 })
+    expect(agg).toEqual({
+      burntAreaM2: 0,
+      perimeterM: 0,
+      maxFirelineIntensity: 0,
+      // Null, not the middle of the grid: an unlit fire has no plume, and defaulting the
+      // position is exactly the bug the centroid exists to fix.
+      flamingCentroid: null,
+      flamingCells: 0,
+    })
   })
 })
 

@@ -19,8 +19,12 @@ export const BURNOUT_MODEL_BYTES = BURNOUT_MODEL_FLOATS * 4
 /** Slots in the aggregate atomic buffer. Must match the `AGG_*` constants in the shader. */
 export const AGG_BURNT_CELLS = 0
 export const AGG_PERIM_EDGES = 1
+export const AGG_FLAMING_X = 3
+export const AGG_FLAMING_Z = 4
+export const AGG_FLAMING_CELLS = 5
 export const AGG_MAX_INTENSITY_BITS = 2
-export const AGGREGATE_SLOTS = 3
+/** burntCells, perimEdges, maxIntensityBits, flamingX, flamingZ, flamingCells. */
+export const AGGREGATE_SLOTS = 6
 
 /**
  * Pack the burnout model table for the shader.
@@ -63,9 +67,21 @@ export function decodeAggregates(raw: Uint32Array, cellM: number): FireAggregate
   const burntCells = raw[AGG_BURNT_CELLS] ?? 0
   const edges = raw[AGG_PERIM_EDGES] ?? 0
   const maxBits = raw[AGG_MAX_INTENSITY_BITS] ?? 0
+  const flamingCells = raw[AGG_FLAMING_CELLS] ?? 0
+  // Centroid of the FLAMING front, world metres. Null when nothing is alight — the caller
+  // must not fall back to a fixed point, which is the bug this exists to fix.
+  const flamingCentroid =
+    flamingCells > 0
+      ? {
+          x: ((raw[AGG_FLAMING_X] ?? 0) / flamingCells + 0.5) * cellM,
+          z: ((raw[AGG_FLAMING_Z] ?? 0) / flamingCells + 0.5) * cellM,
+        }
+      : null
   return {
     burntAreaM2: burntCells * cellM * cellM,
     perimeterM: edges * cellM * PERIMETER_DEBIAS,
     maxFirelineIntensity: kWm(bitsToF32(maxBits)),
+    flamingCentroid,
+    flamingCells,
   }
 }

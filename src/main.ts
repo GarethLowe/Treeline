@@ -993,12 +993,20 @@ function applyCanopyWeather(): void {
   // the plume tilts in another.
   smoke?.setWind(Math.sin(toRad) * settings.windMps, -Math.cos(toRad) * settings.windMps)
   smoke?.setModel(f.burnoutModelForSmoke())
+  // Anchor the plume on the FLAMING FRONT, not the middle of the map. A fixed source meant a
+  // fire spreading away from the domain centre left its own plume behind: every crown at the
+  // front then read ambient gas, and the canopy could not ignite however hard the surface
+  // burned. Falls back to the centre only while nothing is alight, when there is no plume to
+  // place anyway.
+  const seat = f.outputs.flamingCentroid
+  const plumeX = metres(seat?.x ?? (centre as number))
+  const plumeZ = metres(seat?.z ?? (centre as number))
   c.setWeather({
     firelineIntensityKWm: f.predicted.firelineIntensity as number,
     flameDepthM: 1,
-    sourceX: centre as number,
-    sourceZ: centre as number,
-    sourceGroundY: w.terrain.heightAt(centre, centre) as number,
+    sourceX: plumeX as number,
+    sourceZ: plumeZ as number,
+    sourceGroundY: w.terrain.heightAt(plumeX, plumeZ) as number,
     windSpeedMps: settings.windMps,
     windDirX: Math.sin(toRad),
     windDirZ: -Math.cos(toRad),

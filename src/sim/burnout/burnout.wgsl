@@ -71,6 +71,15 @@ const STATE_BURNT: u32 = 2u;
 const AGG_BURNT_CELLS: u32 = 0u;
 const AGG_PERIM_EDGES: u32 = 1u;
 const AGG_MAX_INTENSITY_BITS: u32 = 2u;
+// Centroid of the cells that are FLAMING RIGHT NOW, in cell indices, summed for a CPU divide.
+//
+// The convective plume has to be anchored somewhere, and it was anchored to the middle of the
+// domain — a constant. A fire that spreads away from that point leaves its own plume behind,
+// every crown at the front reads ambient gas, and the canopy cannot ignite no matter how hard
+// the surface burns. Flaming, not burnt: a ring fire's burnt centroid sits in the black.
+const AGG_FLAMING_X: u32 = 3u;
+const AGG_FLAMING_Z: u32 = 4u;
+const AGG_FLAMING_CELLS: u32 = 5u;
 
 struct BurnoutModel {
   // 1/tau per size class [s^-1]. Zero for a class with no loading.
@@ -216,6 +225,11 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
   // debiased on the CPU by pi/4 (see PERIMETER_DEBIAS in fields.ts). Off-grid counts as
   // unburnt so a fire leaving the domain still reports a closed perimeter.
   atomicAdd(&aggregates[AGG_BURNT_CELLS], 1u);
+  if (state == STATE_BURNING) {
+    atomicAdd(&aggregates[AGG_FLAMING_X], gid.x);
+    atomicAdd(&aggregates[AGG_FLAMING_Z], gid.y);
+    atomicAdd(&aggregates[AGG_FLAMING_CELLS], 1u);
+  }
   var edges = 0u;
   if (gid.x == 0u      || !has_arrived(coord + vec2<i32>(-1,  0))) { edges = edges + 1u; }
   if (gid.x == n - 1u  || !has_arrived(coord + vec2<i32>( 1,  0))) { edges = edges + 1u; }

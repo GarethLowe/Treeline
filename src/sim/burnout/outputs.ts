@@ -91,6 +91,9 @@ export class FireOutputs implements IFireOutputs {
 
   /** Read-only input: normal rate of spread at arrival [m/s]. Owned by the solver. */
   readonly rosArrivalTexture: GPUTexture
+  /** Centroid of the flaming front, world metres. Null when nothing is alight. */
+  flamingCentroid: { readonly x: number; readonly z: number } | null = null
+  flamingCells = 0
 
   private readonly device: GPUDevice
   private readonly params: GPUBuffer
@@ -296,6 +299,8 @@ export class FireOutputs implements IFireOutputs {
       this.burntAreaM2 = agg.burntAreaM2
       this.perimeterM = agg.perimeterM
       this.maxFirelineIntensity = agg.maxFirelineIntensity
+      this.flamingCentroid = agg.flamingCentroid
+      this.flamingCells = agg.flamingCells
     } finally {
       this.readingBack = false
     }

@@ -152,8 +152,11 @@ const PARAMS_BYTES = 16
  */
 export const CROWN_MASS_SCALE = 64
 
-/** flaming, everIgnited, crownDry, crownInitial. */
-const STAT_SLOTS = 4
+/** Fixed-point scale for the voxel temperature diagnostic, shared with the WGSL. */
+export const TEMP_SCALE = 16
+
+/** flaming, everIgnited, crownDry, crownInitial, maxTemp, warmCount. */
+const STAT_SLOTS = 6
 const WORKGROUP = 64
 
 export class CanopyVoxelStep {

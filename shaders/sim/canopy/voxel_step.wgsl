@@ -62,6 +62,15 @@ const ST_EVER_IGNITED: u32 = 1u;
 // Fixed point because WGSL has no f32 atomics.
 const ST_CROWN_DRY: u32 = 2u;
 const ST_CROWN_INITIAL: u32 = 3u;
+// Diagnostics: the hottest voxel and how many are meaningfully above ambient. Without these,
+// "the canopy is not igniting" cannot be told apart from "the canopy is not being HEATED",
+// and those have completely different causes — one is kinetics, the other is the radiation or
+// convection chain that feeds them.
+const ST_MAX_TEMP: u32 = 4u;
+const ST_WARM_COUNT: u32 = 5u;
+const TEMP_SCALE: f32 = 16.0;
+/// 50 K over a 293 K ambient: unambiguously heated by the fire, not by the diurnal cycle.
+const WARM_K: f32 = 343.0;
 
 // Irradiance is stored in kW m^-2 (f16 tops out at 65504 and a flame sheet is 117600 W m^-2).
 const KW_TO_W: f32 = 1000.0;
@@ -310,6 +319,8 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
   // pass that is already running.
   atomicAdd(&voxelStats[ST_CROWN_DRY], u32(max(dryMass, 0.0) * CROWN_MASS_SCALE));
   atomicAdd(&voxelStats[ST_CROWN_INITIAL], u32(max(initialDry, 0.0) * CROWN_MASS_SCALE));
+  atomicMax(&voxelStats[ST_MAX_TEMP], u32(max(temperature, 0.0) * TEMP_SCALE));
+  if (temperature >= WARM_K) { atomicAdd(&voxelStats[ST_WARM_COUNT], 1u); }
 
   // --- Write back ----------------------------------------------------------
   // f16 saturates at 65504 and temperature never approaches it, but a NaN here would poison
@@ -329,4 +340,6 @@ fn clearStats() {
   atomicStore(&voxelStats[ST_EVER_IGNITED], 0u);
   atomicStore(&voxelStats[ST_CROWN_DRY], 0u);
   atomicStore(&voxelStats[ST_CROWN_INITIAL], 0u);
+  atomicStore(&voxelStats[ST_MAX_TEMP], 0u);
+  atomicStore(&voxelStats[ST_WARM_COUNT], 0u);
 }
