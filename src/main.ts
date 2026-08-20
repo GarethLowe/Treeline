@@ -564,6 +564,11 @@ async function primeCanopy(): Promise<string> {
     // Yield often: both subsystems keep mapAsync-driven readbacks whose callbacks are
     // macrotasks, and a tight loop starves them exactly as it did in the surface self-test.
     if ((i & 15) === 15) {
+      // Re-seat the plume on the fire, exactly as the frame loop does. Leaving it out meant
+      // the probe ran a plume pinned to the ignition point while the front moved away from
+      // it — so the probe was not exercising the shipping path, which is the one thing a
+      // probe exists to do.
+      applyCanopyWeather()
       await d.device.queue.onSubmittedWorkDone()
       await new Promise((r) => setTimeout(r, 0))
     }
