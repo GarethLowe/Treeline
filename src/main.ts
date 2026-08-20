@@ -53,6 +53,7 @@ import { WorldRenderer } from './app/worldRenderer.ts'
 import { FROXEL_NX, FROXEL_NY, FroxelVolumetrics } from '@render/volumetrics/froxel.ts'
 import { FUEL_MODELS } from '@sim/rothermel/fuelModels.ts'
 import { FireSim, dominantFuelModel, gpuErrors, weatherFrom } from './app/fire.ts'
+import { flameDepth } from '@sim/rothermel/kernel.ts'
 import { CanopySim } from './app/canopy.ts'
 import { SMOKE_NXZ, SMOKE_TOP_M, SmokeField } from '@sim/smoke/field.ts'
 import { ignitionShape, ndcFromPointer, pickGround } from './app/ignition.ts'
@@ -1008,7 +1009,12 @@ function applyCanopyWeather(): void {
   const plumeZ = metres(seat?.z ?? (centre as number))
   c.setWeather({
     firelineIntensityKWm: f.predicted.firelineIntensity as number,
-    flameDepthM: 1,
+    // D = R * t_r, Rothermel/Anderson — the along-wind depth of the flaming zone, and the
+    // width of the line source the plume rises from. It was hardcoded to 1 m, which makes the
+    // plume a narrow column: `gaussT` then falls to nothing within a few metres of the axis
+    // and crowns either side of the front see ambient gas. A slash fire's flaming zone is
+    // several metres deep, so this was out by a factor of several.
+    flameDepthM: Math.max(0.1, flameDepth(f.predicted.rateOfSpread, f.predicted.residenceTime) as number),
     sourceX: plumeX as number,
     sourceZ: plumeZ as number,
     sourceGroundY: w.terrain.heightAt(plumeX, plumeZ) as number,

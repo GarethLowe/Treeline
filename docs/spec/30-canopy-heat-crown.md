@@ -108,6 +108,23 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 
 ### 7.5 Convection
 
+> **OPEN QUESTION (unverified):** **The plume's near field collapses, and crown initiation cannot happen because of it.** Measured with `scripts/crown-probe.mjs` for an 8011 kW/m surface fire (SB4, flame depth 4.37 m, $B_0 = 133.4$ — which matches $gQ'/(ho c_p T)$ exactly, so the source term is right):
+>
+> | z | $g'$ | $w$ | $b$ | $g'wb$ | $\Delta T_c$ |
+> |---|---|---|---|---|---|
+> | 1 m | 4.48e2 | 0.10 | 2.19 | 98.0 | 900 K |
+> | 4 m | 2.84e1 | 11.33 | **0.30** | 98.0 | 850 K |
+> | 8 m | 1.10e1 | 11.04 | **0.81** | 98.0 | 328 K |
+> | 16 m | 4.96e0 | 11.02 | 1.79 | 98.0 | 148 K |
+>
+> Buoyancy flux is conserved, so the ODE itself is sound. But the half-width **collapses from 2.19 m at the source to 0.30 m at 4 m and then regrows**. The cause is the initial condition: `solvePlume` starts at $w_0 = 0.1$ m/s, buoyancy accelerates the plume to ~11 m/s within a few metres, and continuity ($Q=\sqrt{\pi}wb$) forces $b$ down. No plume necks to a seventh of its source width and re-expands.
+>
+> The consequence is quantitative. At 8 m the centreline has tilted 1.37 m downwind while $b$ is 0.81 m, so a voxel **directly above the fire** sits 1.6 half-widths off-axis and receives $\exp(-1.37^2/(\lambda b)^2) pprox 0.16$ of the centreline excess — **51 K instead of 328 K**. Convection is the channel crown initiation runs on, so the 3D canopy does not ignite under any surface fire: measured max voxel 373 K against an ignition gate of 656 K, 0 flaming of 1.2 M.
+>
+> **This is why the measured crown fraction burned reads 0 % while Van Wagner's curve reads 94 % on the same fire.** The empirical criterion says this stand crowns ($I = 8011 > I_0 = 3514$ kW/m); the 3D canopy says nothing ignites. One of them is wrong and it is almost certainly this.
+>
+> A width floor $b \ge b_0$ was tried and **rejected**: it raises the 8 m gas temperature to 267 K over ambient but breaks conservation ($g'wb$ becomes 704/265/119 instead of a constant 98), i.e. it delivers more energy than the fire supplies. The right fix is a **virtual origin** placed so the similarity solution passes through the source width, which needs source conditions for a flame zone from the literature — Mercer & Weber on line-fire plumes, or Van Wagner's own convective treatment. A first estimate puts the virtual origin near 19 m, which would give only ~85 K at 8 m and still not ignite, so the discrepancy may not be the near field alone. **Obtain the source conditions before changing the initial condition.**
+
 The coupled wind field (see the meteorology section) carries a gas enthalpy scalar. Buoyant plume rise on the froxel grid uses the Morton–Taylor–Turner entrainment closure; for a line source of strength $I$ (kW m⁻¹) the centreline excess temperature falls as $\Delta T \propto I^{2/3} z^{-1}$ with entrainment coefficient $\alpha_e$ (**calibration knob #2**). Atmospheric stability modulates plume rise and hence how far downwind hot gas is delivered into the canopy.
 
 **Entrainment coefficient — convention is normative.** $\alpha_e$ is defined in the **Gaussian
