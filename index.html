@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ForestFire</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0c0e;
+        --panel: rgba(12, 14, 17, 0.82);
+        --line: rgba(255, 255, 255, 0.09);
+        --dim: #7d838d;
+        --fg: #d6d8dc;
+        --accent: #ff7a2f;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; overflow: hidden; background: var(--bg); }
+      body {
+        font: 12px/1.45 ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+        color: var(--fg);
+      }
+      #view { display: block; width: 100vw; height: 100vh; }
+
+      /* ---------------------------------------------------------------- boot */
+      #boot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        padding: 2rem; background: var(--bg); z-index: 40; overflow: auto;
+      }
+      #boot[hidden] { display: none; }
+      #boot-inner { max-width: 56rem; width: 100%; }
+      h1 { font-size: 1rem; font-weight: 600; letter-spacing: .04em; margin-bottom: 1rem; }
+      h1 span { color: var(--accent); }
+      h2 {
+        font-size: .72rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+        color: var(--dim); margin: 1.25rem 0 .5rem;
+      }
+      dl { display: grid; grid-template-columns: 15rem 1fr; gap: .25rem 1.25rem; }
+      dt { color: var(--dim); }
+      dd { color: var(--fg); overflow-wrap: anywhere; }
+      .ok { color: #6fcf7f; }
+      .warn { color: #e5c04b; }
+      .err { color: #ff6b5e; }
+      .dim { color: var(--dim); }
+
+      /* stage list */
+      #stages { list-style: none; display: grid; gap: .2rem; }
+      #stages li { display: grid; grid-template-columns: 1.4rem 15rem 6rem 1fr; gap: .5rem; align-items: baseline; }
+      #stages .mark { text-align: center; }
+      #stages .t { text-align: right; color: var(--dim); }
+      #stages .note { color: var(--dim); overflow-wrap: anywhere; }
+      #stages li[data-state="pending"] { color: var(--dim); }
+      #stages li[data-state="running"] .mark { color: var(--accent); }
+      #stages li[data-state="done"] .mark { color: #6fcf7f; }
+      #stages li[data-state="failed"] .mark, #stages li[data-state="failed"] { color: #ff6b5e; }
+
+      #bar { height: 2px; background: rgba(255,255,255,.08); margin: .9rem 0; }
+      #bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+
+      #msg { margin-top: 1rem; white-space: pre-wrap; }
+      #remedies { margin-top: .75rem; display: grid; gap: .55rem; }
+      #remedies .r { border-left: 2px solid var(--accent); padding-left: .7rem; }
+      #remedies .rt { color: var(--fg); }
+      #remedies .rd { color: var(--dim); }
+      #remedies code { color: #9fd2ff; }
+      pre.trace {
+        margin-top: .6rem; padding: .6rem .7rem; background: rgba(255,255,255,.04);
+        border-radius: 3px; white-space: pre-wrap; color: var(--dim); max-height: 16rem; overflow: auto;
+      }
+
+      /* ---------------------------------------------------------------- hud */
+      .panel {
+        position: fixed; z-index: 20; background: var(--panel); border: 1px solid var(--line);
+        border-radius: 4px; padding: .55rem .7rem; backdrop-filter: blur(6px);
+      }
+      #hud { top: .6rem; left: .6rem; max-width: 25rem; white-space: pre; font-size: 11px; line-height: 1.4; }
+      #hud[hidden], #controls[hidden] { display: none; }
+      #hud .k { color: var(--dim); }
+
+      #controls { top: .6rem; right: .6rem; width: 18.5rem; max-height: calc(100vh - 1.2rem); overflow: auto; }
+      #controls h3 {
+        font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim);
+        font-weight: 600; margin: .5rem 0 .35rem;
+      }
+      #controls h3:first-child { margin-top: 0; }
+      #controls .row { display: grid; grid-template-columns: 5.6rem 1fr; gap: .4rem; align-items: center; margin-bottom: .25rem; }
+      #controls label { color: var(--dim); }
+      #controls input[type="range"] { width: 100%; }
+      #controls input[type="text"], #controls input[type="number"], #controls select, #controls button {
+        width: 100%; background: rgba(255,255,255,.06); color: var(--fg); border: 1px solid var(--line);
+        border-radius: 3px; padding: .18rem .3rem; font: inherit;
+      }
+      #controls button { cursor: pointer; }
+      #controls button:hover { background: rgba(255,255,255,.12); }
+      #controls .val { color: var(--fg); }
+      #controls .hint { color: var(--dim); margin-top: .4rem; }
+
+      #toast {
+        position: fixed; bottom: .6rem; left: 50%; transform: translateX(-50%); z-index: 30;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+        padding: .35rem .7rem; color: var(--dim);
+      }
+      #toast[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="hud" class="panel" hidden></div>
+    <div id="controls" class="panel" hidden></div>
+    <div id="toast" hidden></div>
+
+    <div id="boot">
+      <div id="boot-inner">
+        <h1>FOREST<span>FIRE</span> &mdash; <span id="boot-phase">device bring-up</span></h1>
+        <div id="bar"><i></i></div>
+        <ul id="stages"></ul>
+        <h2 id="report-heading" hidden>Adapter</h2>
+        <dl id="report"></dl>
+        <div id="msg"></div>
+        <div id="remedies"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

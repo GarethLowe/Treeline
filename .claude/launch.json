@@ -1,0 +1,13 @@
+{
+  "//": "node.exe is invoked by absolute path with Vite's JS entry point directly, because this session's PATH predates the Node install and neither `npm` nor `node` resolve from it.",
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "forestfire-dev",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeArgs": ["node_modules/vite/bin/vite.js"],
+      "port": 5173,
+      "url": "http://127.0.0.1:5173"
+    }
+  ]
+}
