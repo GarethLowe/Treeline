@@ -106,6 +106,24 @@ fn plumeGasState(heightM : f32, acrossM : f32) -> GasState {
   return GasState(ambientT + dTc * gaussT, length(vec2<f32>(wLocal, wind)), s);
 }
 
+// The plume's CENTRELINE profile at a height above the source, with no cross-plume Gaussian
+// applied: x = excess temperature over ambient [K], y = vertical velocity [m/s].
+//
+// The Gaussian localises the solve to a line through one anchor point, which is right for a
+// canopy voxel asking "what gas is passing through me" and wrong for a smoke field asking
+// "how fast does a buoyant parcel rise here". A fire is a burning AREA and every part of it
+// lofts; the line plume describes the structure above one line of it.
+fn plumeCentrelineAt(heightM : f32) -> vec2<f32> {
+  if (heightM < 0.0 || heightM > PLUME_LUT_TOP_M) {
+    return vec2<f32>(0.0, 0.0);
+  }
+  let f = (heightM / PLUME_LUT_TOP_M) * (PLUME_LUT_ROWS - 1.0);
+  let i0 = min(u32(floor(f)), u32(PLUME_LUT_ROWS) - 2u);
+  let t = f - f32(i0);
+  let row = mix(plume.lut[i0], plume.lut[i0 + 1u], t);
+  return vec2<f32>(row.x, row.y);
+}
+
 // Convenience: world-space voxel centre -> gas state, using the source position and wind axis
 // carried in the uniform. `acrossM` is the projection onto the wind axis, so a voxel upwind of
 // the fire gets a negative offset and sees ambient, which is correct.

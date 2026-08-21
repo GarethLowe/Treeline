@@ -198,14 +198,35 @@ fn advect(@builtin(global_invocation_id) gid: vec3u) {
 
   // Vertical velocity from WP 3.4's plume solve. Spec §6.4's "parameterised buoyant vertical
   // velocity" IS that LUT, so using anything else would put two different plumes in one
-  // simulation. `plumeGasStateAtWorld` wants absolute world Y and the field's Y is height above
-  // ground, so the plume's own source ground height is added back before the call.
-  let gas = plumeGasStateAtWorld(vec3f(p.x, plume.axis.z + p.y, p.z));
-  // GasState.speed is |(w_local, wind)| with the plume's OWN ambient wind, carried in
-  // plume.params.z. Recover the vertical component from that, not from sp.windX/Z, or the two
-  // disagree the moment the HUD wind and the plume's wind are set from different places.
-  let windRef = plume.params.z;
-  let w = sqrt(max(0.0, gas.speed * gas.speed - windRef * windRef));
+  // simulation.
+  //
+  // The CENTRELINE profile, scaled by how buoyant this parcel actually is, rather than
+  // `plumeGasStateAtWorld`'s cross-plume Gaussian. That Gaussian is right for a canopy voxel
+  // ("what gas is passing through me") and wrong here. It localises lift to a strip of
+  // half-width b about ONE line through the flaming centroid, and b is about 2 m near the
+  // ground while a smoke cell is 4 m wide -- so on a 4.7 ha fire, 549 of the 551 cells holding
+  // smoke sat outside the strip, read w = 0, and the whole field stayed pinned in its
+  // injection layer. The `?debug` probe has reported that as "injected but NOT LIFTED" for as
+  // long as it has existed.
+  //
+  // A parcel as hot as the plume centreline rises like the centreline; one at ambient does not
+  // rise at all. That ties lift to the buoyancy the field is already carrying, and it lofts the
+  // whole burning area rather than one line across it.
+  //
+  // ponytail: this is a closure, not a second plume solve -- the rise velocity of a parcel is
+  // taken from the solved profile at its height rather than integrated per column. The upgrade
+  // path is a plume per active front once M5's wind field makes several fronts distinguishable.
+  // Read the buoyancy UPSTREAM, which for a rising parcel is the cell below. Taking it from
+  // this cell instead is circular and silently does nothing: an empty cell has no excess
+  // temperature, so it computes zero rise velocity, so it never backtraces down into the smoke
+  // underneath it, so it stays empty. The field then sits exactly where injection put it and
+  // every diagnostic reads identically to having made no change at all.
+  let prof = plumeCentrelineAt(p.y);
+  let below = textureLoad(srcField, vec3i(coord.x, coord.y, max(coord.z - 1, 0)), 0);
+  let here = textureLoad(srcField, coord, 0);
+  let excess = max(here.r, below.r);
+  let buoyantFraction = clamp(excess / max(prof.x, 1.0), 0.0, 1.0);
+  let w = prof.y * buoyantFraction;
 
   let vel = vec3f(sp.windX, w, sp.windZ);
   var back = p - vel * sp.dt;
