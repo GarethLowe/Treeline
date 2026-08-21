@@ -95,6 +95,14 @@ const env = {
   // kW/m2". That single unmeasured input is what made this script answer NO IGNITION and sent
   // three sessions after a plume that was working. If you change a number here, take it from a
   // probe line, not from an estimate.
+  //
+  // This number is LOW on purpose and must not be "corrected" upward. `radiation/layout.ts`
+  // ships next-event estimation against a clustered emitter list instead of 7.4's cone tracer,
+  // and drops the analytic near-field panel term with it. The stated accepted error is a
+  // deficit above 20 % inside ~10 m, taken deliberately because 7.5's own worked numbers put
+  // convection two to three orders of magnitude above radiation in the near field. Radiation's
+  // job here is the drying front at 20-100 m. A crown at 8 m ignites convectively, and this
+  // probe agreeing with that is the model working, not the model failing.
   irradiance: 2490,
   extinction: 0.5 * LAD,
   leafAreaDensity: LAD,

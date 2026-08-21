@@ -307,6 +307,13 @@ async function build(stages: StageTracker): Promise<void> {
     } catch (err) {
       boot.appendBlock('M3 canopy chain probe', `FAILED: ${String(err)}`)
     }
+    boot.setPhase('debug — checking 1x and 8x agree at equal simulated time')
+    await yieldToBrowser()
+    try {
+      boot.appendBlock('Clock equivalence', await probeClockEquivalence())
+    } catch (err) {
+      boot.appendBlock('Clock equivalence', `FAILED: ${String(err)}`)
+    }
     boot.appendBlock(
       'Near-field flames (WP 4.5)',
       renderer.flames === null
@@ -593,6 +600,114 @@ async function primeCanopy(): Promise<string> {
     `${(f.outputs.maxFirelineIntensity as number).toFixed(0)} kW/m` +
     (f.dispatchOverflowed ? '   <- DISPATCH OVERFLOWED' : '')
   )
+}
+
+/**
+ * Does the simulation give the same answer at 1x as at 8x?
+ *
+ * It did not, and for most of this project's life nothing would have noticed. `FireSim.step`
+ * spends `timeScale` as substeps of the caller's dt and advances its own clock by all of them;
+ * the composition layer then advanced the canopy, the smoke and the firebrands once, with the
+ * UNSCALED dt. At the shipping default of 8x the surface fire ran eight seconds while the
+ * canopy heating it ran one, and smoke emission was evaluated against the surface clock. Every
+ * coupled result at any speed above 1x was invalid, and the comments in all three files said
+ * they shared one clock.
+ *
+ * Both halves are fixed — `step` returns the time it advanced, and the canopy and smoke
+ * substep at MAX_SIM_SUBSTEP_S rather than swallowing the interval whole — but a fix nobody
+ * can check is a fix that comes back. So: run the same ignition to the same SIMULATED time at
+ * two different speeds and compare what the solver ends up holding.
+ *
+ * Exact equality is not the bar and would be the wrong bar: the canopy accumulates through
+ * atomics whose ordering is not fixed, and float addition is not associative, so two runs that
+ * schedule the same work differently land a hair apart. Divergence from a clock error is not a
+ * hair — it is the factor of eight this exists to catch.
+ */
+async function probeClockEquivalence(): Promise<string> {
+  const f = fire
+  const c = canopy
+  const d = device
+  if (f === null || c === null || d === null) return 'no fire or canopy'
+
+  const centre = metres(DOMAIN_SIZE_M / 2)
+  const TARGET_S = 30
+  const base = seconds(1 / 30)
+
+  const runAt = async (scale: number): Promise<{ burnt: number; ignited: number; t: number }> => {
+    const previous = f.timeScale
+    f.timeScale = scale
+    f.reset()
+    // The canopy carries state across runs, so without this the second run starts in a forest
+    // the first one already burned and reports MORE ignition on LESS canopy time. That is how
+    // the first version of this probe passed with the bug deliberately reintroduced.
+    c.reset()
+    f.ignite({ kind: 'point', x: centre, z: centre, radius: metres(15) })
+    // Frames, not steps: `scale` substeps happen inside each one. Both runs therefore cover
+    // TARGET_S of simulated time and differ only in how it is chopped up.
+    const frames = Math.round(TARGET_S / ((base as number) * scale))
+    for (let i = 0; i < frames; i++) {
+      const encoder = d.device.createCommandEncoder({ label: 'clock.equiv' })
+      const simDt = f.step(encoder, base)
+      c.step(encoder, simDt, f.outputs)
+      smoke?.step(encoder, simDt, f.simTimeS)
+      d.device.queue.submit([encoder.finish()])
+      if ((i & 15) === 15) {
+        applyCanopyWeather()
+        await d.device.queue.onSubmittedWorkDone()
+        await new Promise((r) => setTimeout(r, 0))
+      }
+    }
+    await d.device.queue.onSubmittedWorkDone()
+    await new Promise((r) => setTimeout(r, 50))
+    await f.outputs.readAggregates()
+    const out = { burnt: f.outputs.burntAreaM2, ignited: c.everIgnitedVoxels, t: f.simTimeS }
+    f.timeScale = previous
+    return out
+  }
+
+  const slow = await runAt(1)
+  const fast = await runAt(8)
+
+  const rel = (a: number, b: number): number =>
+    Math.max(a, b) <= 0 ? 0 : Math.abs(a - b) / Math.max(a, b)
+  const burntRel = rel(slow.burnt, fast.burnt)
+  const TOL = 0.05
+
+  // The CANOPY is the discriminating measurement, and burnt area on its own is not — which is
+  // worth stating plainly, because the first version of this probe asserted only on burnt area
+  // and could not have failed. The surface solver substeps internally and has always been
+  // correct at every speed; the clock bug starved the canopy, the smoke and the firebrands
+  // while leaving the surface untouched. Assert on the subsystem that was actually wrong.
+  //
+  // Loose on purpose. Ignition counts are small integers accumulated through atomics, so two
+  // schedules land some way apart even when both are right — 630 against 694 here. The bug
+  // gives the fast run an EIGHTH of the canopy time, which is not a near miss.
+  const CANOPY_TOL = 2.5
+  const ratio =
+    Math.min(slow.ignited, fast.ignited) <= 0
+      ? slow.ignited === fast.ignited
+        ? 1
+        : Infinity
+      : Math.max(slow.ignited, fast.ignited) / Math.min(slow.ignited, fast.ignited)
+  const ok = burntRel <= TOL && ratio <= CANOPY_TOL
+  const verdict = ok
+    ? 'PASS — the two clocks agree, so timeScale changes how fast you watch and not what happens.'
+    : 'FAIL — the subsystems are on different clocks again. Check that every caller passes the ' +
+      'time FireSim.step returns, and that the canopy and smoke substep it rather than ' +
+      'swallowing the whole interval in one step.'
+
+  return [
+    `clock equivalence same ignition run to ${TARGET_S} s of simulated time at two speeds`,
+    `  1x              ${slow.t.toFixed(1)} s sim, ${slow.burnt.toFixed(0)} m2 burnt, ` +
+      `${slow.ignited.toLocaleString()} voxels ever ignited`,
+    `  8x              ${fast.t.toFixed(1)} s sim, ${fast.burnt.toFixed(0)} m2 burnt, ` +
+      `${fast.ignited.toLocaleString()} voxels ever ignited`,
+    `  burnt area      ${(burntRel * 100).toFixed(1)} % apart (tolerance ${(TOL * 100).toFixed(0)} %) ` +
+      `— the SURFACE was never wrong at speed, so this alone cannot catch the bug`,
+    `  canopy ignition ${ratio === Infinity ? 'one run ignited nothing' : `${ratio.toFixed(2)}x apart`} ` +
+      `(tolerance ${CANOPY_TOL.toFixed(1)}x) — this is the measurement that discriminates`,
+    verdict,
+  ].join(String.fromCharCode(10))
 }
 
 /**
@@ -940,6 +1055,7 @@ function fireHudFrame(f: FireSim): FireHudFrame {
             criticalIntensityKWm: crown.criticalIntensity as number,
             crownFractionBurned: crown.crownFractionBurned,
             cfbIsDiagnostic: crown.crownFractionBurnedIsDiagnostic,
+            curveCrownFractionBurned: crown.curveCrownFractionBurned,
             envelopeWarnings: crown.envelopeWarnings,
             ...(renderer?.flames == null
               ? {}
@@ -951,6 +1067,21 @@ function fireHudFrame(f: FireSim): FireHudFrame {
                     voxelsFlaming: canopy?.flamingVoxels ?? 0,
                   },
                 }),
+          },
+        }),
+    // M3.6 has been stepping every frame since the milestone landed and reporting to nobody:
+    // `FirebrandStats` had every field the HUD wants and nothing ever passed it across. A
+    // subsystem with no readout is indistinguishable from one that is not running, which is the
+    // failure this project keeps paying for.
+    ...(canopy === null
+      ? {}
+      : {
+          firebrands: {
+            airborne: canopy.firebrands.stats.airborne,
+            landed: canopy.firebrands.stats.landed,
+            ignitionsCaused: canopy.firebrands.stats.ignitionsCaused,
+            maxSpotDistanceM: canopy.firebrands.stats.maxSpotDistanceM as number,
+            wired: canopy.firebrands.hasEverHadEmitters,
           },
         }),
     measured: {
@@ -1209,6 +1340,9 @@ function toast(text: string): void {
 
 function resetFire(): void {
   fire?.reset()
+  // The canopy too. Resetting the fire and the smoke but not the voxel field left every crown
+  // that had ever burned charred for the rest of the session.
+  canopy?.reset()
   const d = device
   if (smoke !== null && d !== null) {
     const enc = d.device.createCommandEncoder({ label: 'smoke.reset' })

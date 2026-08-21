@@ -141,18 +141,30 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 > modelling defects remain; they were simply not the cause of non-ignition, and neither is
 > urgent now that crowns ignite:
 >
-> 1. `solvePlume` starts at ground level at $w_0 = 0.1$ m/s. Mercer & Weber (1994), *Plumes
->    Above Line Fires in a Cross-Wind*, IJWF 4(4):201 - the model this implements - is valid
->    **above the flaming zone**, taking width, velocity and temperature at a height above the
->    flame tip. Byram flame length gives that height and 7.4 the flame temperature, both already
->    sourced here; $w_0$ then follows from buoyancy-flux conservation rather than being chosen.
->    **Obtain the source conditions from the paper before changing the initial condition.** A
->    width floor $b \ge b_0$ was tried and rejected: it breaks conservation ($g'wb$ becomes
->    704/265/119 against a constant 98, delivering more energy than the fire supplies).
-> 2. The LUT resamples 128 m onto 32 rows - **4.13 m per row** - so the whole near field, where
->    $b$ collapses from 2.19 m to 0.33 m and $w$ climbs from 0.1 to 11.3 m/s, falls between rows
->    0 and 1 and is reconstructed by linear interpolation across it. Note that **necking above a
->    flame zone is real** (pool-fire plumes do it), so the collapse is not by itself an error.
+> 1. **DONE 2026-08-21.** `solvePlume` now starts at the flame tip: Byram flame length gives
+>    the height, 7.4's flame-sheet value gives the source temperature, the flaming zone's depth
+>    gives $b_0$, and $w_0$ follows from buoyancy-flux conservation
+>    ($g'wb = F k_\lambda/(\lambda\sqrt{\pi})$) rather than being chosen. No new constant, so
+>    the paywalled paper was not needed after all. For SB4, $w_0$ goes 0.10 -> 1.48 m/s.
+>
+>    **The necking is reduced, not removed, and by less than was first reported.** Measured on
+>    the profile the narrowest half-width goes from $0.137\,b_0$ to $0.213\,b_0$ — a factor of
+>    7.3 to a factor of 4.7 — with the minimum at $z pprox 5.9$ m, just above the flame tip,
+>    where necking is a real phenomenon. The commit that made the change reported 3.5 because
+>    the figure was read off **LUT row 2**: `buildPlumeLut` resamples 128 m onto 32 rows, 4.13 m
+>    apart, and the minimum falls between rows. Anyone diagnosing the near field from LUT rows
+>    will conclude it is fine. `test/sim/canopy/convection/plumeSource.test.ts` pins both the
+>    profile minimum and the fact that the LUT hides it.
+> 2. The LUT resamples 128 m onto 32 rows — **4.13 m per row** — so the near field is
+>    reconstructed by linear interpolation across a band it cannot resolve. See above for what
+>    that cost. Resolving it means either more rows or a non-uniform spacing dense near the
+>    source.
+>
+> **The smoke field no longer depends on either.** It used to take its vertical velocity from
+> `plumeGasStateAtWorld`, whose cross-plume Gaussian of width $b$ is right for a canopy voxel
+> and wrong for a 4 m smoke cell; it now takes the centreline profile scaled by the parcel's own
+> buoyancy, so a collapsed $b$ can no longer pin the field. The **canopy voxels still read
+> through the Gaussian**, and at 2 m they are the consumer a narrow $b$ can still hurt.
 >
 > **The methodological lesson, which is the expensive part.** `crown-probe.mjs` was built on
 > exactly the right principle - "if the CPU says a crown should ignite and the GPU says it does

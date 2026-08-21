@@ -104,6 +104,8 @@ export interface FireHudFrame {
       /** Voxels the solver had FLAMING at the same moment. */
       readonly voxelsFlaming: number
     }
+    /** What Van Wagner's curve says, whether or not it is the number being reported. */
+    readonly curveCrownFractionBurned: number
     /** True when CFB is the Van Wagner curve, not a measurement of the voxel field. */
     readonly cfbIsDiagnostic: boolean
     /** WP 3.5: non-empty when this stand is outside Van Wagner's validated envelope. */
@@ -114,6 +116,8 @@ export interface FireHudFrame {
     readonly landed: number
     readonly ignitionsCaused: number
     readonly maxSpotDistanceM: number
+    /** False when nothing has ever supplied the spawner with emitters — see FirebrandSystem. */
+    readonly wired: boolean
   }
 }
 
@@ -236,7 +240,19 @@ export function fireLines(f: FireHudFrame): readonly string[] {
       row(
         '    CFB',
         `${(f.crown.crownFractionBurned * 100).toFixed(0)} %` +
-          (f.crown.cfbIsDiagnostic ? ' — Van Wagner curve, not measured from the canopy' : ''),
+          (f.crown.cfbIsDiagnostic
+            ? ' — Van Wagner curve, not measured from the canopy'
+            : ` measured · ${(f.crown.curveCrownFractionBurned * 100).toFixed(0)} % by Van Wagner` +
+              // Printed side by side because for the whole of M3 they read 0 % and 94 % on the
+              // same fire and nothing surfaced it. They are NOT the same quantity and a gap is
+              // not by itself a defect: Van Wagner's saturates at 1 once crowning is fully
+              // active, while the measured figure is consumed voxel MASS, and a crown fire
+              // takes the fine foliage and leaves branchwood standing. The signature worth
+              // shouting about is the one that was actually wrong — a canopy consuming nothing
+              // under a curve that says it should be an inferno.
+              (f.crown.crownFractionBurned < 0.02 && f.crown.curveCrownFractionBurned > 0.5
+                ? '  <- CANOPY CONSUMING NOTHING'
+                : '')),
       ),
       ...f.crown.envelopeWarnings.map((wgn) => `    OUTSIDE ENVELOPE: ${wgn}`),
     )
@@ -262,7 +278,13 @@ export function fireLines(f: FireHudFrame): readonly string[] {
   if (f.firebrands !== undefined) {
     lines.push(
       '',
-      row('  firebrands', `${count(f.firebrands.airborne)} airborne, ${count(f.firebrands.landed)} landed`),
+      row(
+        '  firebrands',
+        f.firebrands.wired
+          ? `${count(f.firebrands.airborne)} airborne, ${count(f.firebrands.landed)} landed`
+          : 'NOT WIRED — nothing calls setEmitters(), so WP 3.6 integrates an empty pool. ' +
+            'These zeros are not a measurement.',
+      ),
       row('    spot fires', `${count(f.firebrands.ignitionsCaused)} caused`),
       row('    max spot', `${f.firebrands.maxSpotDistanceM.toFixed(0)} m`),
     )

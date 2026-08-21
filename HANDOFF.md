@@ -12,15 +12,19 @@ This file is the **present tense only**. If a thing is finished, it belongs in H
 | **M0b — Toolchain** | Complete. Node 24 + Vite + strict TS + Vitest. |
 | **M1 — Walkable world** | Complete and integrated. Boots end to end on a real GPU. |
 | **M2 — Surface fire solver** | Complete and reconciled. GR2 D2L2 reproduces published ROS to 0.32%; the GPU intensity field agrees with the CPU oracle to 1.3%. |
-| **M3 — Canopy, crown fire, firebrands** | Composed and GPU-verified. **The canopy ignites** — 112 voxels flaming, 412 ever ignited under an SB4 fire. |
+| **M3 — Canopy, crown fire, firebrands** | Two channels of three. **The canopy ignites, is drawn, and consumes its foliage** — 551 voxels flaming, 3,249 stems with crown consumption. **Firebrands are inert**, below. |
 | **M4 — Volumetric fire and smoke** | In progress. Smoke field, blackbody colour, froxel march/composite, ground burn scars, near-field flames and tree/grass char are in and GPU-verified. Gaps below. |
 | **M5 — Meteorology and biomes** | In progress. WP 5.2 (Canadian FWI) in, `calibrated`. WP 5.1 solar `validated` from M1. Five packages remain. |
 | **M6** | Not started. Work packages in `docs/spec/90-workpackages.md`. |
 | **Cleanup phases 1 and 2** | Done. Four phase-1 items skipped after inspection; see HISTORY. |
 | **Cleanup phase 3** | Rung 1 (sun occlusion) in and GPU-verified. Rungs 2–4 (TAA, bloom, smoke self-shadowing) remain. |
 
-Whole repo, as of 2026-08-21: **0 type errors, 1770 tests passing / 1 skipped, 51 validation
+Whole repo, as of 2026-08-21: **0 type errors, 1777 tests passing / 1 skipped, 51 validation
 cases green (21 of them `published`), `?debug` PASS with no GPU errors.**
+
+**Owner review pending.** A session of visual work is in and unreviewed: crown flames, the
+depth-aware smoke upsample, plume source conditions, smoke lift, the flame growth envelope and
+foliage consumption. All GPU-verified and green, none judged by eye yet.
 
 ### Next, in order
 
@@ -53,10 +57,8 @@ confirm in two seconds), then the sky pass, then depth.
 The simulation is ahead of the picture. These are the gaps between what is computed and what
 the owner can actually see, which is the order CLAUDE.md says to work in:
 
-- **Nothing renders a crowning canopy.** The voxels burn now, but the draw path still shows
-  surface flames only, so a stand at CFB 94 % looks like a ground fire. The biggest gap.
 - **Fire lights nothing (WP 4.4).** Flames are emissive but cast no light on grass or trunks, so
-  a night fire illuminates nothing.
+  a night fire illuminates nothing. The biggest remaining gap.
 - **No bloom**, so flame cores, the sun disc and sky clamp flat at the ACES shoulder — rung 3.
 - **No sun-transmittance volume** (§7.1.4), so the plume does not self-shadow: a thick column is
   lit evenly instead of bright on top and dark underneath — rung 4.
@@ -64,14 +66,53 @@ the owner can actually see, which is the order CLAUDE.md says to work in:
 - **No scorch on stems, and it was attempted.** Char reaches about flame height; scorch goes far
   higher and is a different relation, and the spec conflates the two (WP 4.6's acceptance
   criterion says "char height matches computed *scorch* height"). Blocked on a constant, below.
-- **No 32-texel vertical burn profile** (§7.6(c)). The burn coordinate is computed analytically
-  per vertex, which needs no texture. The profile earns its place when scorch lands and a stem
-  has two bands rather than one.
+- **Crown consumption is per STEM, not per metre of crown.** `csBurnState` samples the canopy
+  column through each trunk, so a tree browns as a whole rather than from the bottom of its
+  crown upward. §7.6(c)'s 32-texel vertical profile is what resolves that, and it earns its
+  place at the same time scorch does — one band becomes two.
+- **No TAA**, so foliage shimmers; both draw paths already emit dither assuming TAA resolves it.
+
+**Firebrands (WP 3.6) have never spawned a single brand.** The ignition mask the brand shader
+writes is also never consumed by the surface solver, so even a wired spawner would not start a
+spot fire — the loop is open at both ends. The spawner takes its sources
+through `FirebrandSystem.setEmitters`, and **nothing in `src/` calls it** — so the pass
+integrates an empty pool every frame, and has since the milestone was declared composed. Its
+own comment says why: brands need a mass-loss rate per source and `IFireOutputs` does not
+publish one. The HUD said `0 airborne, 0 landed` throughout, which is also exactly what a
+working spotting model says about a fire that is not throwing embers; the two were
+indistinguishable. It now says NOT WIRED instead of printing zeros.
+
+Wiring it needs a GPU emitter gather over flaming canopy voxels (the crown-flame gather in
+`flames.wgsl` already enumerates exactly those, and is the shape to copy) plus a published
+mass-loss field. Note that the firebrand constants are also unsourced — ember half-thickness
+and the drag coefficients, below — so a wired subsystem would still be `estimated`.
+
+## The top sim gap: the world the player sees is not the world the fire reads
+
+`FireSim.writeFuelBed` fills **every one of the 4.19 M surface cells** with a single `packCell`
+word — one fuel model id, one flag set, one moisture vector — by `this.#plane.fill(...)`. The
+model comes from `dominantFuelModel`, the mix-weighted dominant species for the whole domain.
+
+So the world carries species, allometry, terrain-dependent placement and five biomes, and the
+solver reads a uniform sheet. A tree, a clearing, a grass patch and bare ground all carry
+identical fire; the fire cannot find a corridor, a break or a fuel discontinuity, because none
+is expressed. Confirmed 2026-08-21 against the source, from an external review.
+
+This is worth more than any remaining rendering or meteorology item: heterogeneity is most of
+what makes a fire's shape look and behave like a fire's shape, and it is the difference between
+five biomes and five colour schemes.
+
+The plumbing already supports it — `packCell` takes a per-cell `fuelModelId`, per-cell flags
+including non-burnable, and a per-cell moisture vector; only the SOURCE is uniform. Each
+species already carries a `surfaceFuelModel` (§20 §4.3). What is missing is the rasterisation
+from vegetation and terrain into the cell grid, plus a decision about what counts as
+non-burnable (rock, water, bare ground, and whether a road or stream layer exists at all). That
+decision is the owner's, which is why this is written down rather than started.
 
 ## Still to do
 
-**M4.** Temporal reprojection (4.3), fire lighting (4.4), the crowning-canopy draw, smoke
-self-shadowing, and the curl-noise detail warp — structure is currently limited by the 4 m field.
+**M4.** Temporal reprojection (4.3), fire lighting (4.4), smoke self-shadowing, and the
+curl-noise detail warp — smoke structure is currently limited by the 4 m field.
 
 **M5.** Five packages. WP 5.2's FWI is `calibrated`, not `validated`: `DMC` and `DC` reproduce
 the Van Wagner & Pickett (1985) worked example to seven significant figures, but `FFMC`, `ISI`,

@@ -55,7 +55,7 @@ status. 🟡 items are shipping with acknowledged estimates and are surfaced in 
 
 | Document | Section | Detail |
 |---|---|---|
-| [`30-canopy-heat-crown.md:213`](30-canopy-heat-crown.md#L213) | 7.5 Convection | 0.16 is both the correct top-hat value and the rejected Rouse et al. (1952) > Gaussian value. Do not let those be conflated. Rouse et al. is itself a line-fire plume experiment > whose impli… |
+| [`30-canopy-heat-crown.md:225`](30-canopy-heat-crown.md#L225) | 7.5 Convection | 0.16 is both the correct top-hat value and the rejected Rouse et al. (1952) > Gaussian value. Do not let those be conflated. Rouse et al. is itself a line-fire plume experiment > whose impli… |
 
 ## 🔵 Normative decision (2)
 
@@ -71,7 +71,7 @@ status. 🟡 items are shipping with acknowledged estimates and are surfaced in 
 | [`20-surface-spread.md:238`](20-surface-spread.md#L238) | 4.5 Wind speed: midflame adjustment, effective wind, and the wind limit | Closed against RMRS-GTR-371, which restates both the 2013 derivation result and the 2013 recommendation, cross-checked line-by-line against two independent reference implementations that agr… |
 | [`20-surface-spread.md:290`](20-surface-spread.md#L290) | 4.6 Making it a 2D field on the 0.5 m grid | The exponents above were > wrong in this document, and firelab/behave was right. Anderson (1983), INT-305, > p. 7, Eq. 17 (obtained free via FRAMES) states it verbatim: > l/w = 0.936 EXP(0.1… |
 | [`30-canopy-heat-crown.md:111`](30-canopy-heat-crown.md#L111) | 7.5 Convection | The > investigation kept below reached the wrong conclusion, and the correction matters more than > the investigation did: the plume was never why the canopy would not ignite. > > FireSim.st… |
-| [`30-canopy-heat-crown.md:238`](30-canopy-heat-crown.md#L238) | 7.5 Convection | The previous range of 0.08–0.11 was defensible in neither convention: > Gaussian-shaped, but its lower half (0.08–0.095) sits below every published value, so the old prior > actively biased … |
+| [`30-canopy-heat-crown.md:250`](30-canopy-heat-crown.md#L250) | 7.5 Convection | The previous range of 0.08–0.11 was defensible in neither convention: > Gaussian-shaped, but its lower half (0.08–0.095) sits below every published value, so the old prior > actively biased … |
 | [`40-spotting.md:113`](40-spotting.md#L113) | 2.1 Generation rate | Hazard (i) is resolved: there is no factor-of-2 error and no half-thickness ambiguity. The σ column was entered as areal density m/A\perp throughout, provable by back-solving CD = 2\sigma g/… |
 | [`40-spotting.md:140`](40-spotting.md#L140) | 2.2 Equations of motion and shape factor | Sourced, and the missing piece turned out to be the reference-area convention. The former cylinder 1.0 and flat-plate 1.3 were each roughly a factor of 2 too high because a randomly-oriented… |
 | [`50-meteorology.md:5`](50-meteorology.md#L5) | 6. Fire Meteorology and Dynamic Fuel Moisture | The pattern that prompted this callout > — a sense error surviving review because the citation is right and only the direction is > wrong — has now been checked claim by claim against free p… |

@@ -150,6 +150,17 @@ export interface CrownFireResult extends CrownFireState {
   readonly massFlowRate: number
   /** True when `crownFractionBurned` came from the Van Wagner curve, not the voxel field. */
   readonly crownFractionBurnedIsDiagnostic: boolean
+  /**
+   * What Van Wagner's curve says, ALWAYS, even when the measured value is the one reported.
+   *
+   * Two independent answers to the same question: an empirical nomogram fitted to Canadian
+   * conifer, and a count of what a 3D voxel canopy actually consumed. Reporting only one of
+   * them means a disagreement between them can never be noticed, and for the whole of M3 they
+   * disagreed as completely as two numbers can — the curve read 94 % on a stand where the
+   * canopy reported 0 %. That is the single most informative comparison this model can make
+   * about itself, so it is computed whether or not it is used.
+   */
+  readonly curveCrownFractionBurned: number
   /** Non-empty when this stand sits outside Van Wagner's validated envelope. Surface it. */
   readonly envelopeWarnings: readonly string[]
 }
@@ -372,11 +383,13 @@ export function evaluateCrownFire(input: CrownFireInput): CrownFireResult {
         )
       : 'none'
 
-  const crownFractionBurned = hasMeasured
-    ? Math.min(1, Math.max(0, measured))
-    : classification === 'none'
+  const curveCrownFractionBurned =
+    classification === 'none'
       ? 0
       : vanWagnerCrownFractionBurned(input.crownRos, criticalInitiationRos, criticalActiveRos)
+  const crownFractionBurned = hasMeasured
+    ? Math.min(1, Math.max(0, measured))
+    : curveCrownFractionBurned
 
   return {
     classification,
@@ -386,6 +399,7 @@ export function evaluateCrownFire(input: CrownFireInput): CrownFireResult {
     criticalInitiationRos,
     massFlowRate,
     crownFractionBurnedIsDiagnostic: !hasMeasured,
+    curveCrownFractionBurned,
     envelopeWarnings: envelopeWarnings(stand),
   }
 }

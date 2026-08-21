@@ -132,6 +132,22 @@ export class FirebrandSystem {
   private readonly paramU32 = new Uint32Array(rawBuffer(this.paramData))
   private readonly lastState = new Uint32Array(STATE_SLOTS)
   private emitterCount = 0
+
+  /**
+   * True once anything has ever called {@link setEmitters} with a non-empty list.
+   *
+   * Nothing does. WP 3.6 spawns brands from emitters, emitters arrive only through that
+   * setter, and no caller exists anywhere in `src/`, so the whole subsystem integrates an
+   * empty pool every frame and reports zeros. Zeros are exactly what a working spotting model
+   * reports on a fire that is not throwing embers, so the two are indistinguishable from the
+   * outside — and this project has now paid for that mistake three times. The flag makes the
+   * difference legible in the HUD.
+   */
+  get hasEverHadEmitters(): boolean {
+    return this.everHadEmitters
+  }
+
+  private everHadEmitters = false
   private frameIndex = 0
   private reading = false
 
@@ -334,6 +350,7 @@ export class FirebrandSystem {
     }
     if (n > 0) this.device.queue.writeBuffer(this.emitterBuffer, 0, rawBuffer(data))
     this.emitterCount = n
+    if (n > 0) this.everHadEmitters = true
   }
 
   /** `surface` is accepted for the contract and for the ignition write-back; the mass-loss
