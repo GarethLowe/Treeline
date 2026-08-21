@@ -161,6 +161,9 @@ export class FroxelVolumetrics {
     const composite = this.compositeGroupFor(inputs)
     const p2 = encoder.beginComputePass({ label: 'froxel.composite' })
     p2.setPipeline(this.compositePipeline)
+    // Group 0 as well now: the depth-aware upsample reads the scene depth and the camera
+    // transform, so the composite is no longer a pure function of the two low-res textures.
+    p2.setBindGroup(0, this.compositeDepthGroupFor(inputs))
     p2.setBindGroup(1, composite)
     p2.dispatchWorkgroups(Math.ceil(widthPx / 8), Math.ceil(heightPx / 8))
     p2.end()
@@ -225,7 +228,6 @@ export class FroxelVolumetrics {
       entries: [
         { binding: 0, resource: this.scatter.createView() },
         { binding: 1, resource: this.transmittance.createView() },
-        { binding: 2, resource: this.linearSampler },
         { binding: 3, resource: inputs.hdr },
       ],
     })
@@ -235,6 +237,37 @@ export class FroxelVolumetrics {
   }
 
   private cachedHdr: GPUTextureView | null = null
+
+  /**
+   * Group 0 for the COMPOSITE pipeline: the params buffer and the scene depth.
+   *
+   * A separate group from the march's, and deliberately not shared: `layout: 'auto'` derives a
+   * different layout per pipeline from the bindings that entry point actually references, so
+   * the march's group 0 is not compatible here even though the two overlap.
+   *
+   * The depth view is in the cache key for the reason spelled out on `marchGroupFor`: a
+   * resize destroys `hdr-depth` and makes a new view, and a bind group cached over the old one
+   * makes WebGPU reject the whole command buffer at submit — as a warning, so the screen goes
+   * black with nothing thrown and a green test suite. That bug shipped once already.
+   */
+  private compositeDepthGroupFor(inputs: FroxelInputs): GPUBindGroup {
+    if (this.compositeDepthGroup !== null && this.cachedCompositeDepth === inputs.depth) {
+      return this.compositeDepthGroup
+    }
+    this.compositeDepthGroup = this.device.createBindGroup({
+      label: 'froxel.composite.g0',
+      layout: this.compositePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.params } },
+        { binding: 4, resource: inputs.depth },
+      ],
+    })
+    this.cachedCompositeDepth = inputs.depth
+    return this.compositeDepthGroup
+  }
+
+  private compositeDepthGroup: GPUBindGroup | null = null
+  private cachedCompositeDepth: GPUTextureView | null = null
 
   private writeParams(inputs: FroxelInputs): void {
     const buf = new ArrayBuffer(PARAMS_BYTES)

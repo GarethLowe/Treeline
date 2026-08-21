@@ -245,7 +245,11 @@ fn march(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   let coord = vec2i(i32(gid.x), i32(gid.y));
-  textureStore(scatterOut, coord, vec4f(L, 1.0));
+  // Alpha carries the distance this column stopped at. The composite needs it to tell a
+  // froxel that marched to the far background from one that stopped a metre away on a trunk;
+  // without it there is nothing to weight an upsample by. f16 resolves ~0.5 m at 1 km, which
+  // is far finer than the tolerance below cares about.
+  textureStore(scatterOut, coord, vec4f(L, stop));
   textureStore(transOut, coord, vec4f(T, 1.0));
 }
 
@@ -255,15 +259,39 @@ fn march(@builtin(global_invocation_id) gid: vec3u) {
 
 @group(1) @binding(0) var scatterIn: texture_2d<f32>;
 @group(1) @binding(1) var transIn: texture_2d<f32>;
-@group(1) @binding(2) var lowSamp: sampler;
+// binding 2 was the upsample sampler. The depth-aware upsample weights its own taps, so it
+// reads with textureLoad and no sampler exists to bind — and a binding an entry point never
+// references is DROPPED from a `layout: 'auto'` pipeline, which makes supplying it a validation
+// error rather than a harmless extra. The index is left as a hole rather than renumbering.
 @group(1) @binding(3) var hdrTarget: texture_storage_2d<rgba16float, read_write>;
 
-/// `dst = dst * T + L`, per channel, at full resolution.
+/// `dst = dst * T + L`, per channel, at full resolution, upsampled DEPTH-AWARE.
 ///
 /// A compute pass rather than an alpha blend, because the blend equation has one alpha and the
-/// transmittance is three numbers. Bilinear upsampling of a 1/16-res volume is what §7.1.6
-/// budgets 0.25 ms for; the visible artefact it can produce is a soft halo at a hard depth
-/// discontinuity, which is what WP 4.3's depth-aware upsample exists to fix.
+/// transmittance is three numbers.
+///
+/// ## Why plain bilinear is not enough here, and what it looked like
+///
+/// The march terminates each column at ONE scene depth, sampled at the froxel centre. In open
+/// ground that is harmless. In a forest it is not: neighbouring froxels straddle a trunk, so
+/// one stops a couple of metres out and integrates almost nothing while the next runs to the
+/// far background and integrates the whole plume. The low-resolution signal is then close to
+/// BINARY between adjacent texels, and no amount of bilinear filtering rescues a signal that
+/// is already wrong at source — it just ramps between the two wrong answers. On screen the
+/// smoke appeared as hard axis-aligned squares roughly 8 x 6 px, one per froxel column, as
+/// though it were being viewed through a stencil. Reported 2026-08-21; unoccluded smoke looked
+/// correct the whole time, which is what made it read as a resolution problem rather than a
+/// depth one.
+///
+/// So each full-resolution pixel takes its own scene depth and weights the four surrounding
+/// froxels by how well their stop distance agrees with it. A pixel on a distant background
+/// draws from the froxels that also saw background; a pixel on a trunk draws from the ones
+/// that stopped on a trunk. This is the "depth-aware upsample" §7.1.6 named and deferred.
+///
+/// Falls back to the plain bilinear weights when no neighbour agrees, which is what keeps a
+/// silhouette edge from picking one arbitrary froxel and shimmering along it.
+const UPSAMPLE_DEPTH_TOL_M: f32 = 2.0;
+
 @compute @workgroup_size(8, 8)
 fn composite(@builtin(global_invocation_id) gid: vec3u) {
   let dims = textureDimensions(hdrTarget);
@@ -271,8 +299,58 @@ fn composite(@builtin(global_invocation_id) gid: vec3u) {
   let coord = vec2i(i32(gid.x), i32(gid.y));
   let uv = (vec2f(f32(gid.x), f32(gid.y)) + 0.5) / vec2f(f32(dims.x), f32(dims.y));
 
-  let L = textureSampleLevel(scatterIn, lowSamp, uv, 0.0).rgb;
-  let T = textureSampleLevel(transIn, lowSamp, uv, 0.0).rgb;
+  // This pixel's own scene distance, along its own ray — the same quantity the march stored,
+  // measured the same way, or the comparison below would be between two different numbers.
+  let ndc = vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.5, 1.0);
+  let farP = fp.invViewProj * ndc;
+  let rayDir = normalize(farP.xyz / farP.w - fp.cameraPos.xyz);
+  let dFull = sceneDistance(uv, rayDir);
+
+  let lowDims = vec2f(textureDimensions(scatterIn));
+  // Bilinear tap positions in low-resolution texel space.
+  let t = uv * lowDims - vec2f(0.5);
+  let base = floor(t);
+  let frac = t - base;
+
+  var sumL = vec3f(0.0);
+  var sumT = vec3f(0.0);
+  var sumW = 0.0;
+  var sumBilinearL = vec3f(0.0);
+  var sumBilinearT = vec3f(0.0);
+  for (var j = 0; j < 2; j = j + 1) {
+    for (var i = 0; i < 2; i = i + 1) {
+      let px = clamp(
+        vec2i(base) + vec2i(i, j),
+        vec2i(0),
+        vec2i(lowDims) - vec2i(1),
+      );
+      let wx = select(1.0 - frac.x, frac.x, i == 1);
+      let wy = select(1.0 - frac.y, frac.y, j == 1);
+      let bilinear = wx * wy;
+
+      let sc = textureLoad(scatterIn, px, 0);
+      let tr = textureLoad(transIn, px, 0).rgb;
+      sumBilinearL = sumBilinearL + sc.rgb * bilinear;
+      sumBilinearT = sumBilinearT + tr * bilinear;
+
+      // Agreement falls off over a couple of metres. Sky is 1e9 on both sides, so two
+      // background froxels agree exactly rather than both being rejected as far apart.
+      let dLow = sc.a;
+      let closeness = 1.0 / (1.0 + abs(dLow - dFull) / UPSAMPLE_DEPTH_TOL_M);
+      let w = bilinear * closeness;
+      sumL = sumL + sc.rgb * w;
+      sumT = sumT + tr * w;
+      sumW = sumW + w;
+    }
+  }
+
+  var L = sumBilinearL;
+  var T = sumBilinearT;
+  if (sumW > 1e-4) {
+    L = sumL / sumW;
+    T = sumT / sumW;
+  }
+
   let dst = textureLoad(hdrTarget, coord).rgb;
   textureStore(hdrTarget, coord, vec4f(dst * T + L, 1.0));
 }
