@@ -623,7 +623,7 @@ Recorded in `docs/spec/00-overview.md` §0.2, §0.6 and §0.7:
 - Every model carries a validation status, surfaced in the HUD and written into exports.
 - No suppression simulation. No run recording/replay.
 
-## Two environment gotchas
+## Three environment gotchas
 
 1. **The in-app browser pane runs on the Intel iGPU, not the RTX 4070.** It runs under
    `msedgewebview2.exe`, which has no per-app GPU preference set, so Windows gives it the
@@ -637,6 +637,15 @@ Recorded in `docs/spec/00-overview.md` §0.2, §0.6 and §0.7:
 2. **Node is not on this session's PATH** (it was installed after the shell started).
    `.claude/launch.json` therefore calls `node.exe` by absolute path. A fresh terminal will
    have it normally.
+
+3. **`npm run headless` gets the DISCRETE adapter here, so read the line it prints.** Measured
+   2026-08-21: `adapter nvidia / blackwell`, `gpu class discrete (as requested)`. CLAUDE.md
+   says the runner lands on the Intel iGPU and that every frame time from it is ~10x off —
+   that was true of the machine those notes were written on and is not true of this one, so a
+   frame time discarded on the strength of it would be discarded wrongly. The runner prints
+   the adapter every run for exactly this reason. Trust the printed line, not either note.
+   Chrome is installed under `Program Files (x86)` here, which `CHROME_CANDIDATES` already
+   covers.
 
 ## Nothing was downloaded
 
