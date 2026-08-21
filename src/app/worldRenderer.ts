@@ -300,12 +300,13 @@ export class WorldRenderer {
    * default, and burning vegetation must not depend on a debug view being switched on.
    */
   async attachFire(outputs: IFireOutputs, canopyStore: CanopyVoxelStore): Promise<void> {
-    this.foliageRenderer.attachFire(outputs.consumedTexture, outputs.intensityTexture)
+    this.foliageRenderer.attachFire(outputs.consumedTexture, outputs.intensityTexture, canopyStore)
     this.flames?.destroy()
     this.flames = await FlameRenderer.create({
       device: this.#device,
       stateTexture: outputs.stateTexture,
       intensityTexture: outputs.intensityTexture,
+      consumedTexture: outputs.consumedTexture,
       heightTexture: this.#world.terrain.heightTexture,
       colorFormat: HDR_FORMAT,
       depthFormat: DEPTH_FORMAT,

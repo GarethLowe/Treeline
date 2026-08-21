@@ -88,7 +88,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   debug: false,
 
   firePaused: false,
-  fireTimeScale: 8,
+  fireTimeScale: 2,
   // The §4.2 GR2 D2L2 benchmark point, so a fresh load starts at the one condition the solver
   // has been validated against (to 0.32%). 2.2 m/s midflame ≈ 5 mi/h at 20 ft with WAF 0.4.
   windMps: 2.2,

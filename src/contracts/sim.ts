@@ -191,6 +191,21 @@ export const CANOPY_N_Z = 64
 export const CANOPY_CELL_M_3D = 2
 
 /**
+ * Largest simulated step any subsystem integrates in one go, seconds.
+ *
+ * `timeScale` multiplies the amount of simulated time a frame covers. `FireSim.step` has
+ * always spent that as SUBSTEPS of the frame's own dt, so the surface solver's answer does not
+ * depend on how fast the clock is running. The canopy and the smoke field took the whole
+ * interval in a single step instead, so at the default 8x they integrated at 0.27 s where the
+ * fire driving them integrated at 0.033 s, and at 16x more than half a second. Same total time,
+ * different answer.
+ *
+ * 1/30 s is the frame dt those solvers were written against, so this is not a new tuning
+ * parameter — it is the number that makes all three subsystems step on one clock.
+ */
+export const MAX_SIM_SUBSTEP_S = 1 / 30
+
+/**
  * Per-voxel canopy state. Packed; WP 3.1 owns the byte layout and must record the measured
  * footprint, because the spec's brick-pool sizing carries an open question — it was sized
  * from VOXEL occupancy while allocation happens at whole-brick granularity, so a thin

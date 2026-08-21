@@ -37,7 +37,7 @@ import {
 import { MAX_WIDTH_COMPENSATION } from './grassMath.ts'
 import { DOMAIN_SIZE_M } from '@contracts/world'
 import { BURN_LAYER_COUNT } from '@render/materials/patterns.ts'
-import { BURN_PEAK_SCALE } from './layout.ts'
+import { BURN_CROWN_SCALE, BURN_PEAK_SCALE } from './layout.ts'
 
 /** Emit a WGSL `u32` literal. */
 const u = (v: number): string => `${Math.trunc(v)}u`
@@ -82,6 +82,10 @@ const MATERIAL_FLAG_BURNABLE: u32 = ${u(MATERIAL_FLAG_BURNABLE)};
 const MAX_WIDTH_COMPENSATION: f32 = ${f(MAX_WIDTH_COMPENSATION)};
 const BURN_LAYER_COUNT: u32 = ${u(BURN_LAYER_COUNT)};
 const BURN_PEAK_SCALE: f32 = ${f(BURN_PEAK_SCALE)};
+const BURN_CROWN_SCALE: f32 = ${f(BURN_CROWN_SCALE)};
+// Bark stops at the char stage; only foliage runs on to ash. One stage short of the end, in
+// the same 0..1 coordinate burnLayers divides by BURN_LAYER_COUNT - 1.
+const BARK_MAX_BURN: f32 = ${f((BURN_LAYER_COUNT - 2) / (BURN_LAYER_COUNT - 1))};
 
 const USE_SUBGROUPS: bool = ${opts.useSubgroups};
 const DITHER_ALPHA: bool = ${opts.ditherAlpha};

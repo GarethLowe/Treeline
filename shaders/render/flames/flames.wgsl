@@ -67,6 +67,9 @@ struct FlameInstance {
 // Canopy billboards only, so `?debug` can tell "the canopy pass contributed nothing" from
 // "the canopy pass never ran". Both look like surface-only flames on screen.
 @group(1) @binding(4) var<storage, read_write> flameCanopyCount : atomic<u32>;
+// Fraction of the cell's fuel consumed, r8unorm. The gather only ever sees BURNING cells, so
+// over a billboard's life this runs 0 -> 1 across the flaming residence time.
+@group(1) @binding(5) var flameConsumed  : texture_2d<f32>;
 
 @group(2) @binding(0) var<storage, read> flameListRO : array<FlameInstance>;
 
@@ -90,7 +93,20 @@ fn csGather(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (textureLoad(flameState, coord, 0).r != STATE_BURNING) { return; }
 
   let intensity = textureLoad(flameIntensity, coord, 0).r;
-  let flameLen = flameLengthM(intensity);
+  // Byram's L is the flame length of a STEADY front. A cell is not steady: it ignites, burns
+  // through its residence time and dies, and the burning rate rises and falls with it. Read
+  // straight, every billboard sprang to full height the instant its cell ignited and vanished
+  // the instant it stopped, which is most of why a spreading fire read as "exploding out of
+  // the ground" rather than growing.
+  //
+  // ponytail: the ENVELOPE's shape is a visual choice, not a sourced relation — Byram gives
+  // the peak and nothing here gives the rise and fall. Fast growth over the first tenth of the
+  // cell's fuel, full height through the body of the burn, fading away over the last half as
+  // the fuel runs out. Upgrade path is the burning-rate curve `burnout.wgsl` already
+  // integrates, if it is ever exposed per cell.
+  let consumed = textureLoad(flameConsumed, coord, 0).r;
+  let envelope = smoothstep(0.0, 0.10, consumed) * (1.0 - smoothstep(0.50, 1.0, consumed));
+  let flameLen = flameLengthM(intensity) * envelope;
   // Below a few centimetres there is nothing to see and the billboard would be sub-pixel at
   // any sane distance. Skipping them keeps the list for flames that actually read.
   if (flameLen < 0.05) { return; }
@@ -145,6 +161,12 @@ fn csGatherCanopy(@builtin(global_invocation_id) gid : vec3<u32>) {
   for (var d = 0u; d < zCount; d = d + 1u) {
     let v = col.offset + d;
     if (canopy_phase(v) != CANOPY_PHASE_FLAMING) { continue; }
+    // One billboard per flaming voxel is denser than a crown fire reads — reported from the
+    // owner's own Chrome. Thinned by a stable hash of the voxel rather than by a lattice
+    // stride: a stride puts the survivors on a grid and the eye finds it immediately, and
+    // hashing the voxel identity keeps the SAME voxels drawn frame to frame, so thinning does
+    // not turn into flicker. Tuning knob, not a physical quantity.
+    if (rnd01(hash2(zStart + d, column + 977u)) > CROWN_FLAME_KEEP) { continue; }
 
     let slot = atomicAdd(&flameCount, 1u);
     if (slot >= u32(flameU.grid.w)) { return; }

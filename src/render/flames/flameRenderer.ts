@@ -47,6 +47,15 @@ export const FLAME_STRIDE = 2
  */
 export const MAX_FLAMES = 65536
 
+/**
+ * Fraction of flaming canopy voxels that get a billboard.
+ *
+ * One per voxel is denser than a crown fire reads. Purely a look knob — the solver's own count
+ * of flaming voxels is unaffected and is what the HUD reports, so thinning the draw cannot
+ * flatter the physics.
+ */
+export const CROWN_FLAME_KEEP = 0.35
+
 const UNIFORM_BYTES = 128
 const INSTANCE_BYTES = 32
 /** Exposed only so `test/render/flames/canopyGather.test.ts` can pin it to the WGSL struct. */
@@ -59,6 +68,8 @@ export interface FlameRendererInit {
   readonly device: GPUDevice
   readonly stateTexture: GPUTexture
   readonly intensityTexture: GPUTexture
+  /** Consumed fraction, r8unorm — the flame's growth-and-fade envelope over its residence time. */
+  readonly consumedTexture: GPUTexture
   readonly heightTexture: GPUTexture
   readonly colorFormat: GPUTextureFormat
   readonly depthFormat: GPUTextureFormat
@@ -238,6 +249,11 @@ export class FlameRenderer {
           texture: { sampleType: 'unfilterable-float', viewDimension: '2d' },
         },
         { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        {
+          binding: 5,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: 'float', viewDimension: '2d' },
+        },
       ],
     })
     const drawLayout = device.createBindGroupLayout({
@@ -277,6 +293,7 @@ export class FlameRenderer {
         { binding: 2, resource: init.stateTexture.createView() },
         { binding: 3, resource: init.intensityTexture.createView() },
         { binding: 4, resource: { buffer: canopyCount } },
+        { binding: 5, resource: init.consumedTexture.createView() },
       ],
     })
     const drawGroup = device.createBindGroup({
@@ -293,6 +310,7 @@ export class FlameRenderer {
       `const SIGMA_SB : f32 = ${5.670374419e-8};`,
       `const LUT_MIN_K : f32 = ${LUT_MIN_K.toFixed(1)};`,
       `const LUT_MAX_K : f32 = ${LUT_MAX_K.toFixed(1)};`,
+      `const CROWN_FLAME_KEEP : f32 = ${CROWN_FLAME_KEEP};`,
       // The canopy pool, its addressing helpers and the one phase code this pass tests
       // against — emitted from the TypeScript that owns them, never a second copy.
       canopyStorageWgsl(CANOPY_GROUP),

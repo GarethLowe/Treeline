@@ -308,6 +308,16 @@ export class CanopyVoxelStore {
   readonly columnIndexBuffer: GPUBuffer
   readonly groundBuffer: GPUBuffer
   readonly poolABuffer: GPUBuffer
+  /**
+   * Pool A exactly as the voxeliser produced it, kept so the canopy can be put back.
+   *
+   * ~16 B per slot of host memory, about 20 MB on the shipping world. Worth it: without it
+   * `resetFire` left every crown it had ever burnt charred forever — the fire restarted and the
+   * forest did not, which only became obvious once foliage actually changed colour. It cannot
+   * be reconstructed on demand either, because per-voxel water comes from each stem's foliar
+   * moisture at voxelisation time and nothing else records it.
+   */
+  private readonly initialPoolA: Uint32Array<ArrayBuffer>
   readonly poolBBuffer: GPUBuffer
   readonly poolCBuffer: GPUBuffer
   readonly slotCount: number
@@ -331,8 +341,19 @@ export class CanopyVoxelStore {
     this.columnIndexBuffer = make(packed.columnIndex, 'canopy.columnIndex')
     this.groundBuffer = make(packed.ground, 'canopy.ground')
     this.poolABuffer = make(packed.poolA, 'canopy.poolA')
+    this.initialPoolA = packed.poolA
     this.poolBBuffer = make(packed.poolB, 'canopy.poolB')
     this.poolCBuffer = make(packed.poolC, 'canopy.poolC')
+  }
+
+  /**
+   * Put every voxel back to how it was voxelised: ambient, full foliage, full water, inert.
+   *
+   * Pool B is static by construction and pool C is written before it is read every step, so
+   * pool A is the whole of the mutable state.
+   */
+  resetState(): void {
+    this.device.queue.writeBuffer(this.poolABuffer, 0, this.initialPoolA)
   }
 
   /** Bind-group entries in the documented order. */

@@ -23,6 +23,7 @@ struct BucketUniform {
 @group(1) @binding(6) var occlusionTex: texture_2d<f32>;
 @group(1) @binding(7) var<storage, read> burnPeak: array<u32>;
 @group(1) @binding(8) var consumedTex: texture_2d<f32>;
+@group(1) @binding(9) var<storage, read> crownBurn: array<u32>;
 
 fn bucketBase(bucket: u32) -> u32 {
   return control[CONTROL_HEADER_U32S + 2u * bucketU.bucketCount + bucket];
@@ -98,10 +99,24 @@ fn vsTree(in: VsIn, @builtin(instance_index) instanceOffset: u32) -> VsOut {
   out.sunVis = ridgeVisibilityAt(occlusionTex, inst.posX, inst.posZ);
   // `rotated.y` is metres above this stem's own base, which is what the char height is
   // measured against — not the world Y, and not the normalised height fraction.
-  out.burn = stemBurnCoordinate(
-    consumedAt(consumedTex, inst.posX, inst.posZ),
-    f32(burnPeak[unpackInstanceIndex(rec)]) / BURN_PEAK_SCALE,
-    rotated.y,
+  // Two channels, and the tree takes the worse of them. The surface fire chars the base of
+  // the stem up to its flame length; the 3D canopy consumes the crown. Before the second term
+  // existed a tree could stand in a fully crowning stand with perfectly green needles, because
+  // the stem coordinate is gated by char reach and no needle is ever inside it.
+  //
+  // Crown fire consumes NEEDLES; it blackens a trunk, it does not turn one to ash. The stages
+  // run green -> scorch -> char -> ash, so bark is capped at the char stage and only foliage is
+  // allowed to reach the end. Without the cap a crowned stand rendered as white skeletons,
+  // trunks included, which is the ash layer doing exactly what it was asked to do.
+  let idx = unpackInstanceIndex(rec);
+  let crown = f32(crownBurn[idx]) / BURN_CROWN_SCALE;
+  out.burn = max(
+    stemBurnCoordinate(
+      consumedAt(consumedTex, inst.posX, inst.posZ),
+      f32(burnPeak[idx]) / BURN_PEAK_SCALE,
+      rotated.y,
+    ),
+    select(min(crown, BARK_MAX_BURN), crown, isFoliage),
   );
   return out;
 }

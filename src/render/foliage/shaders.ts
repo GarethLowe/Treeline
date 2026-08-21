@@ -11,6 +11,7 @@
  * emitted first and never inside an included fragment.
  */
 
+import { canopyStorageWgsl } from '@sim/canopy/storage/shaders.ts'
 import common from '../../../shaders/foliage/common.wgsl?raw'
 import frameBindings from '../../../shaders/foliage/frameBindings.wgsl?raw'
 import occlusionSample from '../../../shaders/render/shadow/sample.wgsl?raw'
@@ -59,6 +60,8 @@ export function buildFoliageShaders(opts: PreludeOptions): FoliageShaderSources 
     treeDraw: join(prelude, common, occlusionSample, frameBindings, materialBindings, burnShade, treeDraw),
     grassCull: join(prelude, common, frameBindings, grassCull),
     grassDraw: join(prelude, common, occlusionSample, frameBindings, materialBindings, burnShade, grassDraw),
-    burnState: join(prelude, common, burnState),
+    // The canopy pool at group 1: the burn-state fold reads how much of each stem's crown
+    // the 3D canopy has consumed. Through the generated prelude, never a second declaration.
+    burnState: join(prelude, common, canopyStorageWgsl(1), burnState),
   }
 }

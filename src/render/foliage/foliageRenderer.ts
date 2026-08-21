@@ -28,7 +28,8 @@ import type { CameraState, FoliageStats, IFoliageRenderer, IMaterialSystem } fro
 import type { QualitySettings } from '@contracts/gpu'
 import type { ITreeMeshSet, IVegetationSet } from '@contracts/world'
 import { DOMAIN_SIZE_M } from '@contracts/world'
-import { BURN_PEAK_SCALE } from './layout.ts'
+import { BURN_CROWN_SCALE, BURN_PEAK_SCALE } from './layout.ts'
+import { CanopyVoxelStore } from '@sim/canopy/storage/store.ts'
 import {
   CULL_WORKGROUP_SIZE,
   DEFAULT_FOLIAGE_CONFIG,
@@ -204,6 +205,10 @@ export class FoliageRenderer implements IFoliageRenderer {
   private readonly burnStateUniform: GPUBuffer
   private readonly burnStateLayout: GPUBindGroupLayout
   private readonly burnStatePipeline: GPUComputePipeline
+  private readonly crownBurnBuffer: GPUBuffer
+  private readonly canopyPoolLayout: GPUBindGroupLayout
+  /** Null until {@link attachFire}: the canopy is built after this renderer. */
+  private canopyPoolGroup: GPUBindGroup | null = null
   private burnStateBindGroup: GPUBindGroup
   private readonly treeLayout: GPUBindGroupLayout
   private readonly grassDrawLayout: GPUBindGroupLayout
@@ -452,6 +457,7 @@ export class FoliageRenderer implements IFoliageRenderer {
           visibility: GPUShaderStage.VERTEX,
           texture: { sampleType: 'unfilterable-float', viewDimension: '2d' },
         },
+        { binding: 9, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       ],
     })
     const grassCullLayout = device.createBindGroupLayout({
@@ -541,6 +547,12 @@ export class FoliageRenderer implements IFoliageRenderer {
       Math.max(4, this.scene.instanceCount * 4),
       GPUBufferUsage.STORAGE | CD | GPUBufferUsage.COPY_SRC,
     )
+    this.crownBurnBuffer = emptyBuffer(
+      device,
+      'foliage.crownBurn',
+      Math.max(4, this.scene.instanceCount * 4),
+      GPUBufferUsage.STORAGE | CD | GPUBufferUsage.COPY_SRC,
+    )
     this.burnStateUniform = emptyBuffer(device, 'foliage.burnStateU', 16, GPUBufferUsage.UNIFORM | CD)
     device.queue.writeBuffer(
       this.burnStateUniform,
@@ -558,7 +570,12 @@ export class FoliageRenderer implements IFoliageRenderer {
           visibility: GPUShaderStage.COMPUTE,
           texture: { sampleType: 'unfilterable-float', viewDimension: '2d' },
         },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
       ],
+    })
+    this.canopyPoolLayout = device.createBindGroupLayout({
+      label: 'foliage.canopyPoolLayout',
+      entries: CanopyVoxelStore.bindGroupLayoutEntries(GPUShaderStage.COMPUTE),
     })
     this.treeBindGroup = device.createBindGroup({
       label: 'foliage.tree',
@@ -573,6 +590,7 @@ export class FoliageRenderer implements IFoliageRenderer {
         { binding: 6, resource: occlusionView },
         { binding: 7, resource: { buffer: this.burnPeakBuffer } },
         { binding: 8, resource: this.consumedTexture.createView() },
+        { binding: 9, resource: { buffer: this.crownBurnBuffer } },
       ],
     })
     const heightView = this.heightTexture.createView()
@@ -643,7 +661,9 @@ export class FoliageRenderer implements IFoliageRenderer {
     })
     this.burnStatePipeline = device.createComputePipeline({
       label: 'foliage.burnState',
-      layout: device.createPipelineLayout({ bindGroupLayouts: [this.burnStateLayout] }),
+      layout: device.createPipelineLayout({
+        bindGroupLayouts: [this.burnStateLayout, this.canopyPoolLayout],
+      }),
       compute: {
         module: device.createShaderModule({ label: 'foliage.burnState', code: src.burnState }),
         entryPoint: 'csBurnState',
@@ -1046,6 +1066,7 @@ export class FoliageRenderer implements IFoliageRenderer {
         { binding: 1, resource: { buffer: this.instanceBuffer } },
         { binding: 2, resource: { buffer: this.burnPeakBuffer } },
         { binding: 3, resource: this.intensityTexture.createView() },
+        { binding: 4, resource: { buffer: this.crownBurnBuffer } },
       ],
     })
   }
@@ -1058,9 +1079,14 @@ export class FoliageRenderer implements IFoliageRenderer {
    * pipeline creation until the solver exists) would put the foliage pass behind the fire
    * pass in the boot order for no reason.
    */
-  attachFire(consumed: GPUTexture, intensity: GPUTexture): void {
+  attachFire(consumed: GPUTexture, intensity: GPUTexture, canopyStore: CanopyVoxelStore): void {
     this.consumedTexture = consumed
     this.intensityTexture = intensity
+    this.canopyPoolGroup = this.device.createBindGroup({
+      label: 'foliage.canopyPool',
+      layout: this.canopyPoolLayout,
+      entries: canopyStore.bindGroupEntries(),
+    })
     const device = this.device
     const occlusionView = this.occlusionTexture.createView()
     this.treeBindGroup = device.createBindGroup({
@@ -1076,6 +1102,7 @@ export class FoliageRenderer implements IFoliageRenderer {
         { binding: 6, resource: occlusionView },
         { binding: 7, resource: { buffer: this.burnPeakBuffer } },
         { binding: 8, resource: consumed.createView() },
+        { binding: 9, resource: { buffer: this.crownBurnBuffer } },
       ],
     })
     this.grassDrawBindGroup = device.createBindGroup({
@@ -1099,9 +1126,13 @@ export class FoliageRenderer implements IFoliageRenderer {
    * frame rather than reason about when it could be skipped.
    */
   updateBurnState(encoder: GPUCommandEncoder): void {
+    // Skipped entirely until `attachFire` supplies the canopy pool. The pass reads it at group
+    // 1, and dispatching without that group bound is a validation error rather than a no-op.
+    if (this.canopyPoolGroup === null) return
     const pass = encoder.beginComputePass({ label: 'foliage.burnState' })
     pass.setPipeline(this.burnStatePipeline)
     pass.setBindGroup(0, this.burnStateBindGroup)
+    pass.setBindGroup(1, this.canopyPoolGroup)
     pass.dispatchWorkgroups(Math.ceil(this.scene.instanceCount / 64))
     pass.end()
   }
@@ -1131,13 +1162,23 @@ export class FoliageRenderer implements IFoliageRenderer {
       size: bytes,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     })
+    const crownStaging = this.device.createBuffer({
+      label: 'foliage.crownBurn.readback',
+      size: bytes,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    })
     const encoder = this.device.createCommandEncoder({ label: 'foliage.burnPeak.readback' })
     encoder.copyBufferToBuffer(this.burnPeakBuffer, 0, staging, 0, bytes)
+    encoder.copyBufferToBuffer(this.crownBurnBuffer, 0, crownStaging, 0, bytes)
     this.device.queue.submit([encoder.finish()])
     await staging.mapAsync(GPUMapMode.READ)
     const peaks = new Uint32Array(staging.getMappedRange().slice(0))
     staging.unmap()
     staging.destroy()
+    await crownStaging.mapAsync(GPUMapMode.READ)
+    const crowns = new Uint32Array(crownStaging.getMappedRange().slice(0))
+    crownStaging.unmap()
+    crownStaging.destroy()
 
     let touched = 0
     let maxRaw = 0
@@ -1150,6 +1191,17 @@ export class FoliageRenderer implements IFoliageRenderer {
       }
       if (v > maxRaw) maxRaw = v
     }
+    let crownTouched = 0
+    let crownMax = 0
+    let crownSum = 0
+    for (let i = 0; i < this.scene.instanceCount; i++) {
+      const v = (crowns[i] as number) / BURN_CROWN_SCALE
+      if (v > 0.01) {
+        crownTouched++
+        crownSum += v
+      }
+      if (v > crownMax) crownMax = v
+    }
     const kwm = (raw: number): number => raw / BURN_PEAK_SCALE
     // Byram (1959), the same relation burnShade.wgsl uses.
     const charM = (i: number): number => (i > 0 ? 0.0775 * Math.pow(i, 0.46) : 0)
@@ -1159,9 +1211,15 @@ export class FoliageRenderer implements IFoliageRenderer {
       `stood in fire     ${touched} (${((touched / Math.max(1, this.scene.instanceCount)) * 100).toFixed(2)} %)`,
       `peak intensity    max ${kwm(maxRaw).toFixed(1)} kW/m, mean of burnt ${meanKwm.toFixed(1)} kW/m`,
       `implied char      max ${charM(kwm(maxRaw)).toFixed(2)} m up the stem, mean ${charM(meanKwm).toFixed(2)} m`,
+      `crowns consumed   ${crownTouched} stems above 1 %, max ${(crownMax * 100).toFixed(0)} %, ` +
+        `mean of those ${((crownTouched > 0 ? crownSum / crownTouched : 0) * 100).toFixed(0)} %`,
       touched === 0
         ? 'ZERO — nothing has burned yet, or the intensity texture is not reaching this pass.'
         : 'stems remember the fire they stood in; the draw derives char height from this.',
+      crownTouched === 0 && touched > 0
+        ? 'CROWNS ALL GREEN — stems are burning but no crown is consumed. Either the canopy is ' +
+          'not igniting, or the burn-state pass is not reading its voxel pool.'
+        : 'foliage browns and chars from the 3D canopy, not from the surface fire below it.',
     ].join(String.fromCharCode(10))
   }
 

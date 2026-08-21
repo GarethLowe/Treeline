@@ -373,3 +373,10 @@ export function clampInstanceCount(count: number, capacity: number): { count: nu
  * same on both sides of the boundary — hence living here rather than in either shader.
  */
 export const BURN_PEAK_SCALE = 16
+
+/**
+ * Fixed-point scale for the per-instance crown consumed fraction, which is a 0..1 unorm.
+ * WGSL has no float atomics and this is accumulated with `atomicMax`, so it is carried as an
+ * integer. 65535 makes the quantum finer than any burn stage transition can show.
+ */
+export const BURN_CROWN_SCALE = 65535

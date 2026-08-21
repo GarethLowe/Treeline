@@ -21,7 +21,7 @@
 
 import { DOMAIN_SIZE_M } from '@contracts/world'
 import type { Seconds } from '@contracts/units'
-import { m as metres, kWm } from '@contracts/units'
+import { m as metres, kWm, s as seconds } from '@contracts/units'
 import type { ITerrainField, IVegetationSet, SpeciesDef } from '@contracts/world'
 import { CanopyVoxelStore, packStore } from '@sim/canopy/storage/store.ts'
 import { type VoxeliseResult, voxeliseVegetation } from '@sim/canopy/storage/voxelise.ts'
@@ -39,6 +39,7 @@ import { buildPlumeLut, solvePlume } from '@sim/canopy/convection/plume.ts'
 
 import { FirebrandSystem } from '@sim/firebrands/system.ts'
 import type { IFireOutputs } from '@contracts/sim'
+import { MAX_SIM_SUBSTEP_S } from '@contracts/sim'
 
 export interface CanopySimOptions {
   readonly device: GPUDevice
@@ -241,6 +242,27 @@ export class CanopySim {
   }
 
   /**
+   * Put the canopy back to unburnt, and its clocks with it.
+   *
+   * Paired with `FireSim.reset` and `SmokeField.reset`: resetting two of the three left a
+   * forest that stayed charred under a fire that had restarted.
+   */
+  reset(): void {
+    this.store.resetState()
+    this.simTimeS = 0
+    this.nextRadiationS = 0
+    this.flamingVoxels = 0
+    this.everIgnitedVoxels = 0
+    this.crownDryRaw = 0
+    this.crownInitialRaw = 0
+    this.maxVoxelTempK = 0
+    this.warmVoxels = 0
+    this.maxGasTempK = 0
+    this.minCentrelineOffsetM = null
+    this.crownConsumedFraction = null
+  }
+
+  /**
    * Re-solve the plume and repack the uniform.
    *
    * Called on a weather change and at {@link PLUME_UPDATE_INTERVAL_S}; the RK4 solve is 41 µs,
@@ -309,7 +331,14 @@ export class CanopySim {
       )
     }
 
-    this.voxels.encode(encoder, dt)
+    // Substep the voxel integration rather than taking the whole interval at once. See
+    // MAX_SIM_SUBSTEP_S: the surface solver has always substepped, and the canopy taking one
+    // large step made crown kinetics depend on the wall-clock time scale. The radiation chain
+    // above is deliberately NOT in this loop — it is rate-limited to 8 s of simulated time and
+    // re-solving it per substep would cost a full gather for a field that has not moved.
+    const subs = Math.max(1, Math.ceil((dt as number) / MAX_SIM_SUBSTEP_S))
+    const subDt = seconds((dt as number) / subs)
+    for (let i = 0; i < subs; i++) this.voxels.encode(encoder, subDt)
     this.firebrands.step(encoder, dt, surface)
 
     if (!this.readingBack) {

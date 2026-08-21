@@ -13,7 +13,7 @@
  */
 
 import type { Seconds } from '@contracts/units'
-import { SURFACE_CELLS, SURFACE_CELL_M } from '@contracts/sim'
+import { MAX_SIM_SUBSTEP_S, SURFACE_CELLS, SURFACE_CELL_M } from '@contracts/sim'
 import { FUEL_SIZE_CLASSES } from '@contracts/sim'
 import type { CellBurnoutModel } from '@sim/burnout/consumption.ts'
 import CONVECTION_WGSL from '../../../shaders/sim/canopy/convection/convection.wgsl?raw'
@@ -213,15 +213,24 @@ export class SmokeField {
    */
   step(encoder: GPUCommandEncoder, dt: Seconds, nowS: number): void {
     if (this.model === null || this.surfaceGroup === null || !(dt > 0)) return
-    this.writeParams(dt, nowS)
-    const pass = encoder.beginComputePass({ label: 'smoke.advect' })
-    pass.setPipeline(this.advect)
-    pass.setBindGroup(0, this.advectGroups[this.cursor] as GPUBindGroup)
-    pass.setBindGroup(1, this.surfaceGroup)
-    pass.setBindGroup(3, this.plumeGroup as GPUBindGroup)
-    pass.dispatchWorkgroups(SMOKE_NXZ / 4, SMOKE_NXZ / 4, SMOKE_NY / 4)
-    pass.end()
-    this.cursor = 1 - this.cursor
+    // Substepped for the reason on MAX_SIM_SUBSTEP_S. Semi-Lagrangian advection is stable at
+    // any step, but it is not ACCURATE at any step: one 0.5 s step moves a parcel half a cell
+    // and smears it over the trilinear stencil, so a fast clock diffused the plume away faster
+    // than it rose. The injection term is inside the loop with everything else, so a substepped
+    // interval injects the same total mass as a single step of the same length.
+    const subs = Math.max(1, Math.ceil((dt as number) / MAX_SIM_SUBSTEP_S))
+    const subDt = (dt as number) / subs
+    for (let i = 0; i < subs; i++) {
+      this.writeParams(subDt as Seconds, nowS - (dt as number) + subDt * (i + 1))
+      const pass = encoder.beginComputePass({ label: 'smoke.advect' })
+      pass.setPipeline(this.advect)
+      pass.setBindGroup(0, this.advectGroups[this.cursor] as GPUBindGroup)
+      pass.setBindGroup(1, this.surfaceGroup)
+      pass.setBindGroup(3, this.plumeGroup as GPUBindGroup)
+      pass.dispatchWorkgroups(SMOKE_NXZ / 4, SMOKE_NXZ / 4, SMOKE_NY / 4)
+      pass.end()
+      this.cursor = 1 - this.cursor
+    }
   }
 
   destroy(): void {
