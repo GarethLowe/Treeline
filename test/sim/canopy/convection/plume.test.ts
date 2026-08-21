@@ -153,12 +153,21 @@ describe('MANDATORY CI REGRESSION — convention-independent observables to ±5 
   it('scales the centreline excess temperature as I^(2/3) z^-1, per §7.5', () => {
     const weak = solvePlume(source(250), still, { topM: 1024, steps: 2048 })
     const strong = solvePlume(source(2000), still, { topM: 1024, steps: 2048 })
-    const i = at(weak, 256)
+    // EACH profile's own index for 256 m. These two no longer share a z-grid: the integration
+    // starts at the flame tip and Byram flame length depends on intensity, so an 8x intensity
+    // ratio starts the strong plume 2.56 m up and the weak one 0.98 m up, on log grids with
+    // different origins. Taking one index from `weak` and using it on `strong` — which is what
+    // this test did while both started at flameDepth/2 — silently compares 256 m in one plume
+    // against a different height in the other, and reads as a broken scaling law.
+    const iWeak = at(weak, 256)
+    const iStrong = at(strong, 256)
     // dT ~ B^(2/3) ~ I^(2/3); (2000/250)^(2/3) = 4
-    expect(strong.centrelineExcessTempK[i]! / weak.centrelineExcessTempK[i]!).toBeCloseTo(4, 1)
+    expect(
+      strong.centrelineExcessTempK[iStrong]! / weak.centrelineExcessTempK[iWeak]!,
+    ).toBeCloseTo(4, 1)
     // dT ~ 1/z
     const j = at(weak, 512)
-    expect(weak.centrelineExcessTempK[i]! / weak.centrelineExcessTempK[j]!).toBeCloseTo(2, 1)
+    expect(weak.centrelineExcessTempK[iWeak]! / weak.centrelineExcessTempK[j]!).toBeCloseTo(2, 1)
   })
 })
 

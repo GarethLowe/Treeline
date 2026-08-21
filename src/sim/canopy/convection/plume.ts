@@ -76,6 +76,8 @@
  */
 
 import type { Kelvin, KilowattsPerMetre, Metres, MetresPerSecond } from '@contracts/units.ts'
+import { flameLength } from '@sim/rothermel/kernel.ts'
+import { DEFAULT_FLAME_TEMPERATURE_K } from '@sim/canopy/radiation/optics.ts'
 
 // ---------------------------------------------------------------------------
 // Normative constants — spec §7.5
@@ -300,15 +302,46 @@ export function solvePlume(
   const topM = opts.topM ?? DEFAULT_TOP_M
   const steps = opts.steps ?? DEFAULT_STEPS
   assertGaussianAlpha(alphaE)
+  const kLambda0 = Math.sqrt(1 + lambda * lambda)
 
-  const b0 = Math.max(source.flameDepth / 2, 0.1)
-  const z0 = b0
-  const w0 = 0.1
   const B0 = buoyancyFluxPerMetre(source.intensity, env, chiC)
+
+  // --- Source conditions, at the FLAME TIP -----------------------------------
+  //
+  // Mercer & Weber (1994), the model integrated below, is stated to be valid ABOVE the
+  // flaming zone: it takes width, velocity and temperature at a height above the flame tip
+  // and says nothing about the combustion region itself. This used to start at ground level
+  // with `w0 = 0.1` m/s, a number that was chosen rather than derived, and the consequences
+  // were not subtle. Buoyancy accelerated the plume to ~11 m/s within four metres while
+  // continuity (Q = sqrt(pi) w b) forced the half-width DOWN to compensate, so `b` collapsed
+  // from 2.19 m at the source to 0.30 m at 4 m before recovering. Two things fell out of that:
+  //
+  //   - The smoke field never rose. It samples this LUT's vertical velocity through
+  //     `exp(-s^2/b^2)`, and its cells are 4 m wide, so with `b` under a metre no cell centre
+  //     ever sat inside the updraft and every one read w ~ 0. The field stayed pinned in its
+  //     injection layer, which the `?debug` probe had been reporting as "injected but NOT
+  //     LIFTED" for as long as it has existed.
+  //   - Crown-height gas was evaluated on a plume an order of magnitude too narrow.
+  //
+  // Nothing here is a new constant. The start height is Byram flame length, already
+  // `calibrated` in this project and already this project's flame length everywhere else. The
+  // source temperature is 7.4's flame-sheet value, the same one the radiation package heats
+  // the canopy with. The half-width is the flaming zone's own along-wind depth, as before.
+  // `w0` is then the only unknown left, and buoyancy-flux conservation fixes it: the model
+  // conserves g'*w*b = F*k_lambda/(lambda*sqrt(pi)) in a neutral environment, so specifying
+  // g'_0 and b_0 determines w_0 rather than leaving it to be picked.
+  const b0 = Math.max(source.flameDepth / 2, 0.1)
+  const z0 = Math.max(flameLength(source.intensity) as number, b0)
+  const flameExcessK = Math.max(DEFAULT_FLAME_TEMPERATURE_K - env.tempK, 1)
+  const g0 = (G * flameExcessK) / env.tempK
+  const w0 = Math.max(
+    (B0 * kLambda0) / (lambda * Math.sqrt(Math.PI) * b0 * g0),
+    W_STALL * 2,
+  )
 
   // N² = (g/T_a)·dθ/dz. Unstable is clamped to neutral; see PlumeEnvironment.
   const nSq = (G / env.tempK) * Math.max(env.potentialTempGradient, 0)
-  const kLambda = Math.sqrt(1 + lambda * lambda)
+  const kLambda = kLambda0
   const tempScale = env.tempK / G // g'_c → ΔT
 
   // State y = [Q, M, F, X].
