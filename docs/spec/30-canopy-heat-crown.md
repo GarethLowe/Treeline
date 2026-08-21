@@ -108,7 +108,7 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 
 ### 7.5 Convection
 
-> **RESOLVED 2026-08-21 - the canopy was running on a different clock from the fire.** The
+> **CLOSED 2026-08-21 - the canopy was running on a different clock from the fire.** The
 > investigation kept below reached the wrong conclusion, and the correction matters more than
 > the investigation did: **the plume was never why the canopy would not ignite.**
 >

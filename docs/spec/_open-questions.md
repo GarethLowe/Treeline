@@ -7,18 +7,18 @@ themselves means this dashboard cannot drift out of date.
 
 | | Count |
 |---|---|
-| 🔴 Open — unverified | 23 |
+| 🔴 Open — unverified | 22 |
 | 🟡 Shipping as `estimated` | 1 |
 | ⚠️ Known trap | 1 |
 | 🔵 Normative decision | 2 |
-| 🟢 Closed | 10 |
+| 🟢 Closed | 11 |
 | **Total** | **37** |
 
 **🔴 Open items block code that depends on them.** Per spec §0.7.5, a work package must
 either close the question first or explicitly downgrade the affected model's validation
 status. 🟡 items are shipping with acknowledged estimates and are surfaced in the HUD.
 
-## 🔴 Open — unverified (23)
+## 🔴 Open — unverified (22)
 
 | Document | Section | Detail |
 |---|---|---|
@@ -31,7 +31,6 @@ status. 🟡 items are shipping with acknowledged estimates and are surfaced in 
 | [`20-surface-spread.md:150`](20-surface-spread.md#L150) | 4.3 Fuel model parameterisation | the 113 MB figure has not been re-derived and does not obviously reconcile with the field list above it. Counting the listed fields at 2048² = 4,194,304 cells gives 12 B of u8 state (1 + 1 +… |
 | [`20-surface-spread.md:160`](20-surface-spread.md#L160) | 4.3 Fuel model parameterisation | this framing counts the wrong bound. ~20 FLOP × 4.19 M cells is ~84 MFLOP per substep — nanoseconds of ALU on a part rated near 20 TFLOP/s — so arithmetic is not what sets the cost of this p… |
 | [`30-canopy-heat-crown.md:39`](30-canopy-heat-crown.md#L39) | 7.2 Voxel state vector and memory layout | The 8192-brick pool is sized from voxel occupancy (10–18 %), but allocation granularity is a whole 8³ brick. A thin, terrain-following canopy band clips the corner of far more bricks than it… |
-| [`30-canopy-heat-crown.md:111`](30-canopy-heat-crown.md#L111) | 7.5 Convection | The plume's near field collapses, and crown initiation cannot happen because of it. Measured with scripts/crown-probe.mjs for an 8011 kW/m surface fire (SB4, flame depth 4.37 m, B0 = 133.4 —… |
 | [`40-spotting.md:115`](40-spotting.md#L115) | 2.1 Generation rate | The grassland, chaparral and UK mixed rows remain unsourced. No primary measurement of firebrand mass, size or areal density for grass, chaparral shrub or UK gorse/heather/bracken fuels has … |
 | [`40-spotting.md:244`](40-spotting.md#L244) | 4.3 Sampling the wind and plume fields | Which of those three options is normative has not been decided, and the choice is not free. rgba8unorm needs a per-frame velocity scale factor and costs precision in the low-speed ambient fi… |
 | [`40-spotting.md:268`](40-spotting.md#L268) | 4.4 Cost estimate (RTX 4070 Laptop, WebGPU/Chrome) | The stated bound is wrong even though the total is plausible. At these sizes the arithmetic and the memory traffic both cost microseconds, and texture-fetch latency over 100k threads is hidd… |
@@ -56,7 +55,7 @@ status. 🟡 items are shipping with acknowledged estimates and are surfaced in 
 
 | Document | Section | Detail |
 |---|---|---|
-| [`30-canopy-heat-crown.md:157`](30-canopy-heat-crown.md#L157) | 7.5 Convection | 0.16 is both the correct top-hat value and the rejected Rouse et al. (1952) > Gaussian value. Do not let those be conflated. Rouse et al. is itself a line-fire plume experiment > whose impli… |
+| [`30-canopy-heat-crown.md:213`](30-canopy-heat-crown.md#L213) | 7.5 Convection | 0.16 is both the correct top-hat value and the rejected Rouse et al. (1952) > Gaussian value. Do not let those be conflated. Rouse et al. is itself a line-fire plume experiment > whose impli… |
 
 ## 🔵 Normative decision (2)
 
@@ -65,13 +64,14 @@ status. 🟡 items are shipping with acknowledged estimates and are surfaced in 
 | [`20-surface-spread.md:55`](20-surface-spread.md#L55) | 4.2 The Rothermel (1972) formulation as implemented | The review found this section stating moisture two > ways: Mf and Mx are declared here as oven-dry-mass fractions, but the §4.3 fuel > table tabulates Mx in percent (15, 20, 25, 35), the §4.… |
 | [`70-rendering-audio.md:9`](70-rendering-audio.md#L9) | 7.1 Volumetric fire and smoke | > > Per §0.5.1: build the top end first, then expose a slider. The full froxel raymarch is > written first and is the reference implementation — level 5 is the thing every cheaper tier > is … |
 
-## 🟢 Closed (10)
+## 🟢 Closed (11)
 
 | Document | Section | Detail |
 |---|---|---|
 | [`20-surface-spread.md:238`](20-surface-spread.md#L238) | 4.5 Wind speed: midflame adjustment, effective wind, and the wind limit | Closed against RMRS-GTR-371, which restates both the 2013 derivation result and the 2013 recommendation, cross-checked line-by-line against two independent reference implementations that agr… |
 | [`20-surface-spread.md:290`](20-surface-spread.md#L290) | 4.6 Making it a 2D field on the 0.5 m grid | The exponents above were > wrong in this document, and firelab/behave was right. Anderson (1983), INT-305, > p. 7, Eq. 17 (obtained free via FRAMES) states it verbatim: > l/w = 0.936 EXP(0.1… |
-| [`30-canopy-heat-crown.md:182`](30-canopy-heat-crown.md#L182) | 7.5 Convection | The previous range of 0.08–0.11 was defensible in neither convention: > Gaussian-shaped, but its lower half (0.08–0.095) sits below every published value, so the old prior > actively biased … |
+| [`30-canopy-heat-crown.md:111`](30-canopy-heat-crown.md#L111) | 7.5 Convection | The > investigation kept below reached the wrong conclusion, and the correction matters more than > the investigation did: the plume was never why the canopy would not ignite. > > FireSim.st… |
+| [`30-canopy-heat-crown.md:238`](30-canopy-heat-crown.md#L238) | 7.5 Convection | The previous range of 0.08–0.11 was defensible in neither convention: > Gaussian-shaped, but its lower half (0.08–0.095) sits below every published value, so the old prior > actively biased … |
 | [`40-spotting.md:113`](40-spotting.md#L113) | 2.1 Generation rate | Hazard (i) is resolved: there is no factor-of-2 error and no half-thickness ambiguity. The σ column was entered as areal density m/A\perp throughout, provable by back-solving CD = 2\sigma g/… |
 | [`40-spotting.md:140`](40-spotting.md#L140) | 2.2 Equations of motion and shape factor | Sourced, and the missing piece turned out to be the reference-area convention. The former cylinder 1.0 and flat-plate 1.3 were each roughly a factor of 2 too high because a randomly-oriented… |
 | [`50-meteorology.md:5`](50-meteorology.md#L5) | 6. Fire Meteorology and Dynamic Fuel Moisture | The pattern that prompted this callout > — a sense error surviving review because the citation is right and only the direction is > wrong — has now been checked claim by claim against free p… |
