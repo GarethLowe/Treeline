@@ -33,7 +33,13 @@ struct FlameU {
 
 struct FlameInstance {
   // xy = world XZ of the billboard's base, z = flame length m, w = per-flame random phase
-  packed : vec4<f32>,
+  packed  : vec4<f32>,
+  // x = world Y of the billboard's base, yzw spare.
+  //
+  // Y is stored rather than looked up because the canopy gather emits flames at CROWN height,
+  // where the terrain height texture is the wrong answer. Storing it for surface flames too
+  // keeps one draw path for both and takes the height sample out of the vertex stage.
+  packed2 : vec4<f32>,
 };
 
 // THREE GROUPS, and the split is forced rather than stylistic: WebGPU does not allow a
@@ -58,6 +64,9 @@ struct FlameInstance {
 @group(1) @binding(1) var<storage, read_write> flameCount  : atomic<u32>;
 @group(1) @binding(2) var flameState     : texture_2d<u32>;
 @group(1) @binding(3) var flameIntensity : texture_2d<f32>;
+// Canopy billboards only, so `?debug` can tell "the canopy pass contributed nothing" from
+// "the canopy pass never ran". Both look like surface-only flames on screen.
+@group(1) @binding(4) var<storage, read_write> flameCanopyCount : atomic<u32>;
 
 @group(2) @binding(0) var<storage, read> flameListRO : array<FlameInstance>;
 
@@ -103,6 +112,58 @@ fn csGather(@builtin(global_invocation_id) gid : vec3<u32>) {
   // read as a row of candles. +/-40% about the mean keeps the mean where the physics put it.
   let vary = 0.6 + 0.8 * rnd01(hash2(gid.y, gid.x));
   flameListRW[slot].packed = vec4<f32>(world, flameLen * vary, phase);
+  flameListRW[slot].packed2 =
+    vec4<f32>(terrainHeightAt(flameHeight, world.x, world.y), 0.0, 0.0, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Canopy gather — the crowning fire
+// ---------------------------------------------------------------------------
+
+// Until this existed the canopy could reach 90 % crown fraction burned and the scene still
+// showed a ground fire: M3 solved crown combustion and nothing drew it.
+//
+// One billboard per FLAMING voxel, appended to the same list the surface gather writes, so
+// there is one draw, one additive blend and no chance of double-brightening where a crown
+// flame overlaps a surface one — which is WP 4.5's stated acceptance criterion.
+//
+// Dispatched over COLUMNS, not slots: a column knows its own zStart and run length, so the
+// voxel's (i, j, k) falls out of the loop index and no slot-to-column map is needed here.
+//
+// ponytail: flame SIZE is the voxel edge, not a solved flame length. Byram's relation is a
+// surface-fire correlation over fireline intensity and there is no published equivalent per
+// canopy voxel; inventing one would be a physical claim this cannot support. The voxel is the
+// honest scale — upgrade path is a crown flame-length correlation if one is ever sourced.
+@compute @workgroup_size(8, 8)
+fn csGatherCanopy(@builtin(global_invocation_id) gid : vec3<u32>) {
+  if (gid.x >= CANOPY_NXY || gid.y >= CANOPY_NXY) { return; }
+  let column = gid.y * CANOPY_NXY + gid.x;
+  let col = canopyColumns[column];
+  let zStart = col.header & CANOPY_Z_MASK;
+  let zCount = (col.header >> CANOPY_ZCOUNT_SHIFT) & CANOPY_Z_MASK;
+
+  for (var d = 0u; d < zCount; d = d + 1u) {
+    let v = col.offset + d;
+    if (canopy_phase(v) != CANOPY_PHASE_FLAMING) { continue; }
+
+    let slot = atomicAdd(&flameCount, 1u);
+    if (slot >= u32(flameU.grid.w)) { return; }
+    atomicAdd(&flameCanopyCount, 1u);
+
+    let centre = canopy_voxel_centre(i32(gid.x), i32(gid.y), i32(zStart + d));
+    let h = hash2(column, zStart + d);
+    let phase = rnd01(h) * 6.2831853;
+    let vary = 0.6 + 0.8 * rnd01(hash2(zStart + d, column));
+    flameListRW[slot].packed = vec4<f32>(centre.x, centre.z, CANOPY_CELL * vary, phase);
+    // Base at the voxel's underside, so the flame occupies the voxel rather than floating a
+    // metre above it.
+    //
+    // Colour comes from the FLAME temperature, not `canopy_temperature(v)`. That field is the
+    // solid temperature of the foliage; the flame sheet burning off it is §7.4's 1200 K
+    // whatever the needles read, and colouring by the solid made crown fire render deep red
+    // because below ~1500 K a Planckian falls outside the sRGB gamut and clamps.
+    flameListRW[slot].packed2 = vec4<f32>(centre.y - CANOPY_CELL * 0.5, 0.0, 0.0, 0.0);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -127,12 +188,15 @@ fn vsFlame(
   @builtin(instance_index) ii : u32,
 ) -> FlameOut {
   let inst = flameListRO[ii].packed;
+  let inst2 = flameListRO[ii].packed2;
   let base = vec2<f32>(inst.x, inst.y);
   let flameLen = inst.z;   // `length` is a WGSL builtin; shadowing it breaks length() below
   let phase = inst.w;
 
   let corner = CORNERS[vi];
-  let groundY = terrainHeightAt(flameHeight, base.x, base.y);
+  // The gather resolved this: terrain height for a surface flame, voxel underside for a
+  // crown one. The vertex stage cannot tell them apart and does not need to.
+  let groundY = inst2.x;
 
   // Billboard about the vertical axis only. A flame is not a sphere: it stands up, so the
   // quad must too, or it shears into the ground when the camera looks down at it.
@@ -214,7 +278,9 @@ fn fsFlame(in : FlameOut) -> @location(0) vec4<f32> {
   // which is what makes the base white-yellow and the tip deep orange. The base value is
   // `DEFAULT_FLAME_TEMPERATURE_K` from `sim/canopy/radiation/optics.ts` (§7.4, sigma T^4 =
   // 117.6 kW m^-2 at 1200 K) — the same number the radiation package heats the canopy with,
-  // passed in rather than repeated here.
+  // passed in rather than repeated here. Surface and crown flames share it: both are flame
+  // sheets, and the fuel they stand on being at a different temperature does not change what
+  // the flame above it radiates.
   let tempK = mix(flameU.wind.w, flameU.wind.w * 0.62, t);
   let u = clamp((tempK - LUT_MIN_K) / (LUT_MAX_K - LUT_MIN_K), 0.0, 1.0);
   let chroma = textureSampleLevel(flameLut, flameLutSamp, u, 0.0).rgb;

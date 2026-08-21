@@ -268,7 +268,7 @@ async function build(stages: StageTracker): Promise<void> {
   // it entirely; M4's volumetrics replaces it.
   // Before the overlay, and unconditionally: vegetation chars from the solver's own output,
   // not from a debug view.
-  await renderer.attachFire(fire.outputs)
+  await renderer.attachFire(fire.outputs, canopy.store)
 
   if (settings.fireView !== 'off') {
     await renderer.attachFireDebug(fire.outputs, asFireView(settings.fireView))
@@ -312,9 +312,11 @@ async function build(stages: StageTracker): Promise<void> {
       renderer.flames === null
         ? 'no flame renderer — attachFire did not run'
         : [
-            `billboards        ${renderer.flames.lastFlameCount} last gathered`,
+            `billboards        ${renderer.flames.lastFlameCount} last gathered, ` +
+              `${renderer.flames.lastCanopyFlameCount} of them crown`,
             `capacity          ${MAX_FLAMES} (overflow is dropped and counted, never wrapped)`,
-            `stride            ${FLAME_STRIDE} surface cells per billboard`,
+            `stride            ${FLAME_STRIDE} surface cells per billboard; the canopy gather ` +
+              `emits one per FLAMING voxel`,
           ].join(String.fromCharCode(10)),
     )
     boot.setPhase('debug — probing vegetation burn state')
@@ -939,6 +941,16 @@ function fireHudFrame(f: FireSim): FireHudFrame {
             crownFractionBurned: crown.crownFractionBurned,
             cfbIsDiagnostic: crown.crownFractionBurnedIsDiagnostic,
             envelopeWarnings: crown.envelopeWarnings,
+            ...(renderer?.flames == null
+              ? {}
+              : {
+                  flames: {
+                    total: renderer.flames.lastFlameCount,
+                    crown: renderer.flames.lastCanopyFlameCount,
+                    capacity: MAX_FLAMES,
+                    voxelsFlaming: canopy?.flamingVoxels ?? 0,
+                  },
+                }),
           },
         }),
     measured: {
@@ -961,8 +973,6 @@ function fireHudFrame(f: FireSim): FireHudFrame {
 const MISSING_OUTPUTS: readonly string[] = [
   'crown fire is classified by the Van Wagner CURVE, not by the 3D canopy: the voxel',
   '  combustion runs, but CFB is the empirical criterion, not a count of what burned',
-  'flames are drawn on the SURFACE only — nothing renders a crowning fire in the canopy,',
-  '  so a stand at CFB 94 % still shows ground flames and smoke',
   'fire lights nothing (WP 4.4): flames are emissive but cast no light on grass or trunks',
   'shadows are a top-down occlusion map, not cascades — no side-lit trunk shadows',
   'volumetrics have no sun-transmittance volume (spec §7.1.4), so the plume does not',

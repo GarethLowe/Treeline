@@ -93,6 +93,17 @@ export interface FireHudFrame {
     readonly classification: string
     readonly criticalIntensityKWm: number
     readonly crownFractionBurned: number
+    /**
+     * Billboards the flame gather emitted last frame, one readback behind. Absent before the
+     * renderer has attached.
+     */
+    readonly flames?: {
+      readonly total: number
+      readonly crown: number
+      readonly capacity: number
+      /** Voxels the solver had FLAMING at the same moment. */
+      readonly voxelsFlaming: number
+    }
     /** True when CFB is the Van Wagner curve, not a measurement of the voxel field. */
     readonly cfbIsDiagnostic: boolean
     /** WP 3.5: non-empty when this stand is outside Van Wagner's validated envelope. */
@@ -229,6 +240,24 @@ export function fireLines(f: FireHudFrame): readonly string[] {
       ),
       ...f.crown.envelopeWarnings.map((wgn) => `    OUTSIDE ENVELOPE: ${wgn}`),
     )
+    if (f.crown.flames !== undefined) {
+      // Whether the crown fire is being DRAWN, not just solved. A canopy at 90 % CFB with no
+      // crown billboards is the renderer failing to show a fire the solver is running, which
+      // is what shipped for the whole of M3 and is invisible from the picture alone.
+      lines.push(
+        row(
+          '    flames',
+          `${f.crown.flames.total.toLocaleString()} billboards, ` +
+            `${f.crown.flames.crown.toLocaleString()} of them crown ` +
+            `for ${f.crown.flames.voxelsFlaming.toLocaleString()} flaming voxels` +
+            (f.crown.flames.total >= f.crown.flames.capacity
+              ? ' — AT CAPACITY, dropping'
+              : f.crown.flames.voxelsFlaming > 0 && f.crown.flames.crown === 0
+                ? ' — SOLVER IS BURNING CROWNS THE RENDERER IS NOT DRAWING'
+                : ''),
+        ),
+      )
+    }
   }
   if (f.firebrands !== undefined) {
     lines.push(

@@ -18,9 +18,15 @@ import flamesWgsl from '../../../shaders/render/flames/flames.wgsl?raw'
 import commonWgsl from '../../../shaders/foliage/common.wgsl?raw'
 import { foliagePrelude } from '@render/foliage/shaderPrelude.ts'
 import { DOMAIN_SIZE_M, SURFACE_CELLS } from '@contracts/world'
+import { CANOPY_N_XY } from '@contracts/sim'
 import { DEFAULT_FLAME_TEMPERATURE_K } from '@sim/canopy/radiation/optics.ts'
 import { LUT_MIN_K, LUT_MAX_K, LUT_SIZE, buildBlackbodyLut } from '@render/volumetrics/blackbody.ts'
 import { rawBuffer } from '@gpu/raw.ts'
+import { CanopyVoxelStore, PHASE_FLAMING } from '@sim/canopy/storage/store.ts'
+import { canopyStorageWgsl } from '@sim/canopy/storage/shaders.ts'
+
+/** Bind group the canopy gather reads its voxel pool through. Groups 0–2 are the flame list. */
+const CANOPY_GROUP = 3
 
 /**
  * Surface cells per billboard, per axis.
@@ -42,7 +48,9 @@ export const FLAME_STRIDE = 2
 export const MAX_FLAMES = 65536
 
 const UNIFORM_BYTES = 128
-const INSTANCE_BYTES = 16
+const INSTANCE_BYTES = 32
+/** Exposed only so `test/render/flames/canopyGather.test.ts` can pin it to the WGSL struct. */
+export const INSTANCE_BYTES_FOR_TEST = INSTANCE_BYTES
 /** vertexCount, instanceCount, firstVertex, firstInstance. */
 const DRAW_ARGS_BYTES = 16
 const VERTS_PER_FLAME = 6
@@ -55,6 +63,15 @@ export interface FlameRendererInit {
   readonly colorFormat: GPUTextureFormat
   readonly depthFormat: GPUTextureFormat
   readonly depthCompare: GPUCompareFunction
+  /**
+   * M3's voxel store, which the canopy gather reads burning voxels out of.
+   *
+   * Required, not optional. `csGatherCanopy` references the pool unconditionally, so a module
+   * built without the storage prelude would not compile — and an invalid pipeline in WebGPU
+   * is a console warning and a silently dropped draw, not a throw. The canopy is a boot stage
+   * and always exists by the time flames are attached, so the option would be dead anyway.
+   */
+  readonly canopyStore: CanopyVoxelStore
 }
 
 export class FlameRenderer {
@@ -63,6 +80,7 @@ export class FlameRenderer {
   readonly #list: GPUBuffer
   readonly #count: GPUBuffer
   readonly #args: GPUBuffer
+  readonly #canopyCount: GPUBuffer
   readonly #countReadback: GPUBuffer
   readonly #lut: GPUTexture
   readonly #sharedGroup: GPUBindGroup
@@ -70,10 +88,14 @@ export class FlameRenderer {
   readonly #drawGroup: GPUBindGroup
   readonly #gather: GPUComputePipeline
   readonly #draw: GPURenderPipeline
+  readonly #canopyGather: GPUComputePipeline
+  readonly #canopyGroup: GPUBindGroup
   readonly #scratch = new ArrayBuffer(UNIFORM_BYTES)
 
   /** Billboards emitted by the last gather that was read back. `?debug` prints it. */
   lastFlameCount = 0
+  /** How many of those came from burning CANOPY voxels rather than the surface. */
+  lastCanopyFlameCount = 0
   /**
    * Readback cycle. A staging buffer may not be written by a submit while it is mapped OR
    * while a map is pending, and `mapAsync` must not be called on a buffer this frame's
@@ -88,6 +110,7 @@ export class FlameRenderer {
     list: GPUBuffer
     count: GPUBuffer
     args: GPUBuffer
+    canopyCount: GPUBuffer
     countReadback: GPUBuffer
     lut: GPUTexture
     sharedGroup: GPUBindGroup
@@ -95,12 +118,15 @@ export class FlameRenderer {
     drawGroup: GPUBindGroup
     gather: GPUComputePipeline
     draw: GPURenderPipeline
+    canopyGather: GPUComputePipeline
+    canopyGroup: GPUBindGroup
   }) {
     this.#device = parts.device
     this.#uniform = parts.uniform
     this.#list = parts.list
     this.#count = parts.count
     this.#args = parts.args
+    this.#canopyCount = parts.canopyCount
     this.#countReadback = parts.countReadback
     this.#lut = parts.lut
     this.#sharedGroup = parts.sharedGroup
@@ -108,6 +134,8 @@ export class FlameRenderer {
     this.#drawGroup = parts.drawGroup
     this.#gather = parts.gather
     this.#draw = parts.draw
+    this.#canopyGather = parts.canopyGather
+    this.#canopyGroup = parts.canopyGroup
   }
 
   static async create(init: FlameRendererInit): Promise<FlameRenderer> {
@@ -139,9 +167,15 @@ export class FlameRenderer {
     })
     device.queue.writeBuffer(args, 0, new Uint32Array([VERTS_PER_FLAME, 0, 0, 0]))
 
+    // Two counts side by side, so one readback covers both: [total, canopy].
+    const canopyCount = device.createBuffer({
+      label: 'flames.canopyCount',
+      size: 4,
+      usage: S | CD | GPUBufferUsage.COPY_SRC,
+    })
     const countReadback = device.createBuffer({
       label: 'flames.count.readback',
-      size: 4,
+      size: 8,
       usage: CD | GPUBufferUsage.MAP_READ,
     })
 
@@ -174,8 +208,10 @@ export class FlameRenderer {
           buffer: { type: 'uniform', minBindingSize: UNIFORM_BYTES },
         },
         {
+          // COMPUTE, not VERTEX: the gather resolves each billboard's base Y now, so the
+          // vertex stage never samples terrain height.
           binding: 1,
-          visibility: GPUShaderStage.VERTEX,
+          visibility: GPUShaderStage.COMPUTE,
           texture: { sampleType: 'unfilterable-float', viewDimension: '2d' },
         },
         {
@@ -201,6 +237,7 @@ export class FlameRenderer {
           visibility: GPUShaderStage.COMPUTE,
           texture: { sampleType: 'unfilterable-float', viewDimension: '2d' },
         },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
       ],
     })
     const drawLayout = device.createBindGroupLayout({
@@ -239,6 +276,7 @@ export class FlameRenderer {
         { binding: 1, resource: { buffer: count } },
         { binding: 2, resource: init.stateTexture.createView() },
         { binding: 3, resource: init.intensityTexture.createView() },
+        { binding: 4, resource: { buffer: canopyCount } },
       ],
     })
     const drawGroup = device.createBindGroup({
@@ -255,6 +293,10 @@ export class FlameRenderer {
       `const SIGMA_SB : f32 = ${5.670374419e-8};`,
       `const LUT_MIN_K : f32 = ${LUT_MIN_K.toFixed(1)};`,
       `const LUT_MAX_K : f32 = ${LUT_MAX_K.toFixed(1)};`,
+      // The canopy pool, its addressing helpers and the one phase code this pass tests
+      // against — emitted from the TypeScript that owns them, never a second copy.
+      canopyStorageWgsl(CANOPY_GROUP),
+      `const CANOPY_PHASE_FLAMING : u32 = ${PHASE_FLAMING}u;`,
       flamesWgsl,
     ].join('\n\n')
     const module = device.createShaderModule({ label: 'flames', code })
@@ -266,7 +308,17 @@ export class FlameRenderer {
       bindGroupLayouts: [sharedLayout, empty, drawLayout],
     })
 
-    const [gather, draw] = await Promise.all([
+    const canopyLayout = device.createBindGroupLayout({
+      label: 'flames.bgl.canopy',
+      entries: CanopyVoxelStore.bindGroupLayoutEntries(GPUShaderStage.COMPUTE),
+    })
+    const canopyGroup = device.createBindGroup({
+      label: 'flames.bg.canopy',
+      layout: canopyLayout,
+      entries: init.canopyStore.bindGroupEntries(),
+    })
+
+    const [gather, draw, canopyGather] = await Promise.all([
       device.createComputePipelineAsync({
         label: 'flames.gather',
         layout: gatherPl,
@@ -301,6 +353,13 @@ export class FlameRenderer {
           depthCompare: init.depthCompare,
         },
       }),
+      device.createComputePipelineAsync({
+        label: 'flames.gatherCanopy',
+        layout: device.createPipelineLayout({
+          bindGroupLayouts: [sharedLayout, gatherLayout, empty, canopyLayout],
+        }),
+        compute: { module, entryPoint: 'csGatherCanopy' },
+      }),
     ])
 
     return new FlameRenderer({
@@ -309,6 +368,7 @@ export class FlameRenderer {
       list,
       count,
       args,
+      canopyCount,
       countReadback,
       lut,
       sharedGroup,
@@ -316,6 +376,8 @@ export class FlameRenderer {
       drawGroup,
       gather,
       draw,
+      canopyGather,
+      canopyGroup,
     })
   }
 
@@ -348,12 +410,20 @@ export class FlameRenderer {
     this.#device.queue.writeBuffer(this.#uniform, 0, this.#scratch)
 
     encoder.clearBuffer(this.#count)
+    encoder.clearBuffer(this.#canopyCount)
     const pass = encoder.beginComputePass({ label: 'flames.gather' })
     pass.setPipeline(this.#gather)
     pass.setBindGroup(0, this.#sharedGroup)
     pass.setBindGroup(1, this.#gatherGroup)
     const blocks = Math.ceil(SURFACE_CELLS / FLAME_STRIDE / 8)
     pass.dispatchWorkgroups(blocks, blocks)
+    // The crowning canopy, appended to the same list in the same pass. After the surface
+    // dispatch rather than before it: if the list overflows, the flames that survive should
+    // be the ones on the ground the camera is standing on.
+    pass.setPipeline(this.#canopyGather)
+    pass.setBindGroup(CANOPY_GROUP, this.#canopyGroup)
+    const cols = Math.ceil(CANOPY_N_XY / 8)
+    pass.dispatchWorkgroups(cols, cols)
     pass.end()
 
     // The count becomes the indirect instance count. A copy rather than a second dispatch:
@@ -368,8 +438,9 @@ export class FlameRenderer {
       void this.#countReadback
         .mapAsync(GPUMapMode.READ)
         .then(() => {
-          this.lastFlameCount =
-            new Uint32Array(this.#countReadback.getMappedRange().slice(0))[0] ?? 0
+          const counts = new Uint32Array(this.#countReadback.getMappedRange().slice(0))
+          this.lastFlameCount = counts[0] ?? 0
+          this.lastCanopyFlameCount = counts[1] ?? 0
           this.#countReadback.unmap()
         })
         .catch(() => undefined)
@@ -378,6 +449,7 @@ export class FlameRenderer {
         })
     } else if (this.#readback === 'idle') {
       encoder.copyBufferToBuffer(this.#count, 0, this.#countReadback, 0, 4)
+      encoder.copyBufferToBuffer(this.#canopyCount, 0, this.#countReadback, 4, 4)
       this.#readback = 'copied'
     }
   }
@@ -395,6 +467,7 @@ export class FlameRenderer {
     this.#list.destroy()
     this.#count.destroy()
     this.#args.destroy()
+    this.#canopyCount.destroy()
     this.#countReadback.destroy()
     this.#lut.destroy()
   }

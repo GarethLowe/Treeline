@@ -52,6 +52,7 @@ import { SkyRenderer } from '@render/sky/sky-renderer.ts'
 import { EnvironmentLighting } from '@render/sky/environment.ts'
 import { createOcclusionTexture, SunOcclusion } from '@render/shadow/sunOcclusion.ts'
 import { FlameRenderer } from '@render/flames/flameRenderer.ts'
+import type { CanopyVoxelStore } from '@sim/canopy/storage/store.ts'
 import { DEPTH_CLEAR_VALUE, DEPTH_COMPARE, DEPTH_FORMAT } from '../camera/math.ts'
 import { HDR_FORMAT, RenderTargets, ResolvePass } from './resolvePass.ts'
 import { TerrainPass } from './terrainPass.ts'
@@ -140,7 +141,10 @@ export class WorldRenderer {
 
   readonly targets: RenderTargets
 
-  /** WP 4.5's flames. Null until {@link attachFire} — they read the solver's own textures. */
+  /**
+   * WP 4.5's flames, surface and crown. Null until {@link attachFire} — they read the solver's
+   * own textures and M3's voxel pool.
+   */
   flames: FlameRenderer | null = null
 
   /** WP 2.6's provisional overlay. Null until {@link attachFireDebug}; deleted when M4 lands. */
@@ -295,7 +299,7 @@ export class WorldRenderer {
    * Separate from {@link attachFireDebug} deliberately: that overlay is optional and off by
    * default, and burning vegetation must not depend on a debug view being switched on.
    */
-  async attachFire(outputs: IFireOutputs): Promise<void> {
+  async attachFire(outputs: IFireOutputs, canopyStore: CanopyVoxelStore): Promise<void> {
     this.foliageRenderer.attachFire(outputs.consumedTexture, outputs.intensityTexture)
     this.flames?.destroy()
     this.flames = await FlameRenderer.create({
@@ -306,6 +310,7 @@ export class WorldRenderer {
       colorFormat: HDR_FORMAT,
       depthFormat: DEPTH_FORMAT,
       depthCompare: DEPTH_COMPARE,
+      canopyStore,
     })
   }
 

@@ -12,3 +12,4 @@ exports/
 
 # Python bytecode from scripts/
 __pycache__/
+content/
