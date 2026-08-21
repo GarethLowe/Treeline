@@ -5,6 +5,7 @@
  * where two packages built in parallel agree today and would fail *silently* if either moved.
  */
 
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { SURFACE_CELLS, SURFACE_CELL_M } from '../../src/contracts/sim.ts'
 import { DOMAIN_SIZE_M } from '../../src/contracts/world.ts'
@@ -247,5 +248,55 @@ describe('crown fire is fed real stand geometry (WP 3.5)', () => {
       crownRos: mps(2),
     })
     expect(r.crownFractionBurned).toBe(0)
+  })
+})
+
+/**
+ * The canopy and the smoke field run on the SURFACE fire's clock.
+ *
+ * `FireSim.step` consumes `timeScale` as substeps, so it advances the world by `scale * dt`
+ * and not by the `dt` its caller passed. Handing that same `dt` to the canopy ran the crowns
+ * at `1/timeScale` of the fire drying them — at the default 8x they sat pinned at the water
+ * boiling plateau and the 3D canopy could not ignite under any surface fire, which read for
+ * three sessions as a plume bug.
+ *
+ * Nothing here can be caught at compile time: both are `Seconds`, so the wrong one type-checks
+ * perfectly. It cannot be caught under Vitest either, since stepping any of this needs a GPU.
+ * So this reads the call sites, exactly as the WGSL mirror tests read the shaders.
+ */
+describe('the canopy steps on the same clock as the fire (main.ts)', () => {
+  const main = readFileSync(new URL('../../src/main.ts', import.meta.url), 'utf8')
+
+  /** Argument list of every `<object>.step(` call, `?.` or not. */
+  const callsTo = (object: string): string[] => {
+    const out: string[] = []
+    for (const opener of [object + '.step(', object + '?.step(']) {
+      let from = 0
+      for (let at = main.indexOf(opener, from); at >= 0; at = main.indexOf(opener, from)) {
+        let depth = 1
+        let i = at + opener.length
+        for (; i < main.length && depth > 0; i++) {
+          if (main[i] === '(') depth++
+          else if (main[i] === ')') depth--
+        }
+        out.push(main.slice(at + opener.length, i - 1))
+        from = i
+      }
+    }
+    return out
+  }
+
+  it('takes the simulated time the fire returns, rather than recomputing it', () => {
+    expect(main).toMatch(/const simDt = f\.step\(/)
+  })
+
+  it('passes that time to every canopy and smoke step, at every call site', () => {
+    const calls = [...callsTo('canopy'), ...callsTo('c'), ...callsTo('smoke')]
+    // Two canopy call sites (frame loop, primeCanopy) and two smoke ones.
+    expect(calls.length).toBeGreaterThanOrEqual(4)
+    for (const args of calls) {
+      expect(args).toContain('simDt')
+      expect(args).not.toMatch(/(^|[(,]\s*)dt\s*[,)]/)
+    }
   })
 })

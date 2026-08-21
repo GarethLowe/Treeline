@@ -659,7 +659,17 @@ export class FireSim {
     return { nonZeroTexels, maxHead }
   }
 
-  step(encoder: GPUCommandEncoder, dt: Seconds): void {
+  /**
+   * Advance the surface fire and RETURN the simulated time it advanced by.
+   *
+   * `timeScale` is consumed here, as substeps, so the caller's `dt` is NOT how far the world
+   * moved — it is `scale * dt`. The canopy and the smoke field run on this clock, and passing
+   * them the caller's `dt` instead ran them at `1/timeScale` of the fire driving them: at the
+   * default 8x the canopy got an eighth of the drying time the surface got, so crowns sat
+   * pinned at the water boiling plateau and nothing ever ignited however hard the surface
+   * burned. Returning the number is what stops that from being re-derivable per call site.
+   */
+  step(encoder: GPUCommandEncoder, dt: Seconds): Seconds {
     // Kick off the aggregate readback for the copy the PREVIOUS step submitted, before
     // anything is encoded into this one. `resolve` below skips its copy while this is in
     // flight, so no command in this encoder can reference a buffer with a pending map.
@@ -686,6 +696,7 @@ export class FireSim {
     // (now - arrival), so resolving it at the substep rate would cost a full-grid pass per
     // substep and produce the same textures.
     this.#burnout.resolve(encoder, seconds(this.simTimeS), this.predicted.reactionIntensity)
+    return seconds(scale * dt)
   }
 
   /**

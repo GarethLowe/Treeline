@@ -5,6 +5,63 @@ What was tried, what broke, and what the failure taught. Kept out of
 
 Every section here is a completed episode. Nothing in this file is a to-do.
 
+## The canopy was on a different clock from the fire, 2026-08-21
+
+**Symptom, for three sessions:** the 3D canopy would not ignite under any surface fire. Van
+Wagner's curve read 94 % crown fraction burned on a stand where the voxel field reported
+0 flaming of 1.2 M, and the hottest voxel in the whole canopy sat at 373.1 K.
+
+**What we concluded, wrongly, twice.** First that the plume's near field collapses (its
+half-width falls 2.19 m -> 0.30 m over 4 m) and starves the crowns. Then, after fixing a NaN in
+`crown-probe.mjs`'s own convection call, that the plume works but "every heated voxel is finding
+the cold side of the plume and none is finding the core", and that the next step was a per-voxel
+gas readback to find an `acrossM` sign error.
+
+**What it actually was.** `FireSim.step` consumes `timeScale` internally as substeps and
+advances the world by `scale x dt`. Its callers passed their own unscaled `dt` on to
+`canopy.step` and `smoke.step`. Both parameters are `Seconds`, so the branded unit types --
+which exist precisely to make unit errors compile errors -- could not see it, because this is
+not a unit error. It is the *same* unit carrying a different quantity. At the default 8x the
+canopy received an eighth of the drying time the fire drying it received.
+
+Drying is enthalpy-limited, so the crowns were not under-heated, they were under-*clocked*:
+they reached the water boiling plateau and stayed there forever, which is why the hottest voxel
+in the canopy was pinned to five significant figures at `WATER_BOILING_K = 373.124`.
+
+**The fix is four lines.** `FireSim.step` returns the simulated time it advanced; the two call
+sites pass that to the canopy and the smoke field instead of their own `dt`. Before and after,
+same GPU, same fire (SB4, 6 m/s, 480 s of surface time):
+
+| | before | after |
+|---|---|---|
+| voxels flaming / ever ignited | 0 / 0 | 112 / 412 |
+| hottest canopy voxel | 373.1 K | 998.3 K |
+| hot-gas voxels pinned at the plateau | 251 of 297 | 0 |
+
+**Three things this cost us, and what now catches each.**
+
+1. **A marginal statistic is not a joint one.** "Hottest gas 1193 K" and "hottest voxel 373 K"
+   were both true and, read together, suggested the hot voxels were elsewhere. They are
+   `atomicMax` over different voxels. The pair that settled it was *gated on one condition* --
+   voxels in gas >= 800 K, and the hottest of those -- which is the only form that describes a
+   single population. Prefer gated pairs to marginals when the question is about one voxel.
+2. **A CPU oracle fed assumed inputs is not an oracle.** `crown-probe.mjs` was written on the
+   right principle ("if the CPU says ignite and the GPU says no, the bug is wiring") and then
+   handed 53 kW/m2 of irradiance where the `?debug` probe reports 2.49. That one unmeasured
+   constant flipped its answer to NO IGNITION and pointed every session at the physics. Fed the
+   measured values, the same oracle ignites the same voxel in 1.83 s. The script now says so at
+   the top, and carries measured numbers.
+3. **The comment asserting the invariant outlived the invariant.** `main.ts` said "M3 on the
+   same encoder and the same clock as the surface fire" directly above the line that broke the
+   clock. Guarded now by a source-text test in `test/app/fire.test.ts`, in the same style as the
+   WGSL mirror tests -- nothing else can catch it, since both values type-check and stepping any
+   of it needs a GPU.
+
+The plume defects the first two sessions found are real and remain open, recorded in
+`docs/spec/30-canopy-heat-crown.md` 7.5: the Mercer & Weber integration still starts at ground
+level rather than above the flaming zone, and the LUT's 4.13 m rows do not resolve the near
+field. Neither was the cause of anything.
+
 ## The contract-first bet paid off
 
 Eight agents built eight packages **in parallel, none of them seeing another's code**, each

@@ -29,7 +29,10 @@ import { CanopyRadiation } from '@sim/canopy/radiation/pass.ts'
 import { SurfaceEmitterPass } from '@sim/canopy/radiation/surfaceEmitters.ts'
 import { buildBrickList, buildExtinctionField } from '@sim/canopy/radiation/build.ts'
 import { RAD_UPDATE_INTERVAL_S, MIN_RAY_COUNT, RAD_NI, RAD_NJ } from '@sim/canopy/radiation/layout.ts'
-import { CanopyVoxelStep, TEMP_SCALE } from '@sim/canopy/voxelStep.ts'
+import { CanopyVoxelStep, OFFSET_NONE, OFFSET_SCALE, TEMP_SCALE } from '@sim/canopy/voxelStep.ts'
+
+/** flaming, everIgnited, crownDry, crownInitial, maxTemp, warmCount, maxGas, minOffset. */
+const STATS_BYTES = 44
 import { PLUME_UNIFORM_BYTES, packPlumeUniforms } from '@sim/canopy/convection/plume.ts'
 import { buildPlumeLut, solvePlume } from '@sim/canopy/convection/plume.ts'
 
@@ -100,6 +103,16 @@ export class CanopySim {
   private crownInitialRaw = 0
   /** Hottest canopy voxel, K. The chain's own answer to "is anything up there heating?". */
   maxVoxelTempK = 0
+
+  /** Hottest plume gas any occupied voxel sampled this step [K]. */
+  maxGasTempK = 0
+
+  /**
+   * Closest any occupied voxel got to the tilted plume centreline [m], or `null` when none was
+   * inside the plume at all. The core at crown base is under a metre wide against a 2 m voxel,
+   * so this is what tells a resolution limit apart from a wiring bug.
+   */
+  minCentrelineOffsetM: number | null = null
   /** Voxels at least 50 K over ambient. */
   warmVoxels = 0
 
@@ -183,7 +196,7 @@ export class CanopySim {
 
     this.statsStaging = device.createBuffer({
       label: 'canopy.voxelStats.staging',
-      size: 24,
+      size: STATS_BYTES,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     })
 
@@ -300,7 +313,7 @@ export class CanopySim {
     this.firebrands.step(encoder, dt, surface)
 
     if (!this.readingBack) {
-      encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, 24)
+      encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, STATS_BYTES)
       this.copyPending = true
     }
   }
@@ -335,7 +348,7 @@ export class CanopySim {
     }
 
     const counter = await read(this.emitters.counter, 20)
-    const stats = await read(this.voxels.stats, 24)
+    const stats = await read(this.voxels.stats, STATS_BYTES)
 
     // Irradiance, over a horizontal slab at the height most canopy occupies. r16float, so the
     // row pitch must reach the 256 B copy alignment.
@@ -415,6 +428,15 @@ export class CanopySim {
         `${(stats[1] ?? 0).toLocaleString()} ever ignited`,
       `  heating         max voxel ${((stats[4] ?? 0) / TEMP_SCALE).toFixed(1)} K, ` +
         `${(stats[5] ?? 0).toLocaleString()} voxels >= 50 K over ambient`,
+      `  convection      hottest gas at a voxel ${((stats[6] ?? 0) / TEMP_SCALE).toFixed(1)} K, ` +
+        `closest approach to the plume centreline ` +
+        ((stats[7] ?? OFFSET_NONE) === OFFSET_NONE
+          ? 'NONE (no voxel inside the plume)'
+          : `${((stats[7] ?? 0) / OFFSET_SCALE).toFixed(2)} m`),
+      `  in the core     ${(stats[8] ?? 0).toLocaleString()} voxels in gas >= 800 K, ` +
+        `hottest of them ${((stats[9] ?? 0) / TEMP_SCALE).toFixed(1)} K`,
+      `  stalled         ${(stats[10] ?? 0).toLocaleString()} of them pinned at the boiling ` +
+        `plateau (many stalled with nothing igniting = the canopy is off the fire's clock)`,
       '',
       emitted === 0
         ? 'NO EMITTERS — the surface fire is not flaming, or WP 2.4 wrote no intensity.'
@@ -485,6 +507,9 @@ export class CanopySim {
         this.crownInitialRaw = raw[3] ?? 0
         this.maxVoxelTempK = (raw[4] ?? 0) / TEMP_SCALE
         this.warmVoxels = raw[5] ?? 0
+        this.maxGasTempK = (raw[6] ?? 0) / TEMP_SCALE
+        const off = raw[7] ?? OFFSET_NONE
+        this.minCentrelineOffsetM = off === OFFSET_NONE ? null : off / OFFSET_SCALE
         this.crownConsumedFraction = this.computeCrownConsumed()
       })
       .finally(() => {

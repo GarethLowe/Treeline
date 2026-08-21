@@ -484,6 +484,11 @@ export interface PlumeGasState {
   readonly gasTempK: number
   /** Speed of the gas past a (stationary) fuel element [m s⁻¹] — plume vertical plus ambient wind. */
   readonly gasSpeed: MetresPerSecond
+  /**
+   * Signed distance from the *tilted* centreline along the wind axis [m], `1e9` above the LUT.
+   * Diagnostic only, and it mirrors `GasState.offsetM` in the WGSL.
+   */
+  readonly offsetM: number
 }
 
 /**
@@ -508,7 +513,7 @@ export function samplePlumeLut(
   const u = cfg.windSpeed
 
   if (heightM < 0 || heightM > topM) {
-    return { gasTempK: cfg.ambientTempK, gasSpeed: Math.abs(u) as MetresPerSecond }
+    return { gasTempK: cfg.ambientTempK, gasSpeed: Math.abs(u) as MetresPerSecond, offsetM: 1e9 }
   }
   const f = (heightM / topM) * (rows - 1)
   const i0 = Math.min(Math.floor(f), rows - 2)
@@ -529,6 +534,7 @@ export function samplePlumeLut(
   return {
     gasTempK: cfg.ambientTempK + dTc * gaussT,
     gasSpeed: Math.hypot(wLocal, u) as MetresPerSecond,
+    offsetM: s,
   }
 }
 

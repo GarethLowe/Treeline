@@ -509,11 +509,13 @@ function stepFire(dt: Seconds): void {
     // The timestamps land in the profiler's shared query set and are resolved by the frame
     // encoder that follows; this submission goes out first, so they are already written.
     const rt = runtime
-    f.step(rt === null ? encoder : attributeEncoder(encoder, rt.profiler, 'surface'), dt)
+    // How far the fire actually moved, `timeScale` included. Everything downstream steps on
+    // this, not on `dt`.
+    const simDt = f.step(rt === null ? encoder : attributeEncoder(encoder, rt.profiler, 'surface'), dt)
     // M3 on the same encoder and the same clock as the surface fire, attributed to its own
     // phase so the two costs can be told apart. It reads the fields WP 2.4 has just written,
     // so it must follow the surface step within the encoder, never precede it.
-    canopy?.step(rt === null ? encoder : attributeEncoder(encoder, rt.profiler, 'canopy'), dt, f.outputs)
+    canopy?.step(rt === null ? encoder : attributeEncoder(encoder, rt.profiler, 'canopy'), simDt, f.outputs)
     // The canopy's own answer to "how much of the crown burned", one readback behind. Van
     // Wagner's curve is only the fallback now.
     if (canopy !== null) f.setMeasuredCrownConsumed(canopy.crownConsumedFraction)
@@ -521,7 +523,7 @@ function stepFire(dt: Seconds): void {
     // surface arrival times WP 2.4 has just resolved, so it follows both.
     smoke?.step(
       rt === null ? encoder : attributeEncoder(encoder, rt.profiler, 'fluid'),
-      dt,
+      simDt,
       f.simTimeS,
     )
     d.device.queue.submit([encoder.finish()])
@@ -555,12 +557,12 @@ async function primeCanopy(): Promise<string> {
   const dt = seconds(1 / 30)
   for (let i = 0; i < 900; i++) {
     const encoder = d.device.createCommandEncoder({ label: 'canopy.prime' })
-    f.step(encoder, dt)
-    c.step(encoder, dt, f.outputs)
+    const simDt = f.step(encoder, dt)
+    c.step(encoder, simDt, f.outputs)
     // The smoke field advects on the same clock. Leaving it out of the prime loop is why the
     // probe below reported an empty field on the first attempt: everything was wired and
     // nothing had ever been stepped.
-    smoke?.step(encoder, dt, f.simTimeS)
+    smoke?.step(encoder, simDt, f.simTimeS)
     d.device.queue.submit([encoder.finish()])
     // Yield often: both subsystems keep mapAsync-driven readbacks whose callbacks are
     // macrotasks, and a tight loop starves them exactly as it did in the surface self-test.

@@ -108,7 +108,63 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 
 ### 7.5 Convection
 
-> **OPEN QUESTION (unverified):** **The plume's near field collapses, and crown initiation cannot happen because of it.** Measured with `scripts/crown-probe.mjs` for an 8011 kW/m surface fire (SB4, flame depth 4.37 m, $B_0 = 133.4$ — which matches $gQ'/(
+> **RESOLVED 2026-08-21 - the canopy was running on a different clock from the fire.** The
+> investigation kept below reached the wrong conclusion, and the correction matters more than
+> the investigation did: **the plume was never why the canopy would not ignite.**
+>
+> `FireSim.step` consumes `timeScale` internally, as substeps, and advances the world by
+> `scale x dt`. Its callers passed their own `dt` - the unscaled one - to the canopy and to the
+> smoke field. Both are `Seconds`, so the branded unit types could not see it; every test and
+> every GPU probe passed. At the default 8x the canopy got an eighth of the drying time the
+> surface fire drying it got, and at the `?fireScale=16` used for these measurements, a
+> sixteenth. Drying is enthalpy-limited, so crown voxels sat pinned at the water boiling
+> plateau indefinitely: they were never given the enthalpy.
+>
+> Measured on a real GPU (nvidia/blackwell, SB4, 6 m/s wind, 480 s of surface time), before and
+> after handing `canopy.step` and `smoke.step` the time the fire actually advanced:
+>
+> | | before | after |
+> |---|---|---|
+> | voxels flaming / ever ignited | 0 / 0 | **112 / 412** |
+> | hottest canopy voxel | 373.1 K, exactly `WATER_BOILING_K` | **998.3 K** |
+> | hot-gas voxels pinned at the plateau | 251 of 297 | **0** |
+> | least water in a hot-gas voxel | 0.01 g/m3, never reaching zero | **0** |
+>
+> **Retracted.** "Every heated voxel in the 3D canopy is finding the cold side of the plume and
+> none is finding the core" is false. The per-voxel gas readback that claim asked for now exists
+> (`ST_MAX_GAS` / `ST_MIN_OFFSET` in `voxel_step.wgsl`) and reports the closest approach to the
+> tilted centreline as **0.00 m**, with the hottest gas at an occupied voxel **1193.1 K** - the
+> full source-height centreline excess. Convection was delivering the whole time. There is no
+> `acrossM` sign error and no canopy-sparsity problem to go looking for.
+>
+> **Still standing.** The near-field measurements below are real and unchanged. Two genuine
+> modelling defects remain; they were simply not the cause of non-ignition, and neither is
+> urgent now that crowns ignite:
+>
+> 1. `solvePlume` starts at ground level at $w_0 = 0.1$ m/s. Mercer & Weber (1994), *Plumes
+>    Above Line Fires in a Cross-Wind*, IJWF 4(4):201 - the model this implements - is valid
+>    **above the flaming zone**, taking width, velocity and temperature at a height above the
+>    flame tip. Byram flame length gives that height and 7.4 the flame temperature, both already
+>    sourced here; $w_0$ then follows from buoyancy-flux conservation rather than being chosen.
+>    **Obtain the source conditions from the paper before changing the initial condition.** A
+>    width floor $b \ge b_0$ was tried and rejected: it breaks conservation ($g'wb$ becomes
+>    704/265/119 against a constant 98, delivering more energy than the fire supplies).
+> 2. The LUT resamples 128 m onto 32 rows - **4.13 m per row** - so the whole near field, where
+>    $b$ collapses from 2.19 m to 0.33 m and $w$ climbs from 0.1 to 11.3 m/s, falls between rows
+>    0 and 1 and is reconstructed by linear interpolation across it. Note that **necking above a
+>    flame zone is real** (pool-fire plumes do it), so the collapse is not by itself an error.
+>
+> **The methodological lesson, which is the expensive part.** `crown-probe.mjs` was built on
+> exactly the right principle - "if the CPU says a crown should ignite and the GPU says it does
+> not, the bug is wiring" - and then the principle was not followed. The CPU said *no* only
+> because the probe was handed inputs nobody had measured: 53 kW/m2 of irradiance against the
+> GPU's actual 2.49 kW/m2, and a hand-picked sample point. Re-run with the values the GPU
+> actually reports, the same CPU oracle ignites the same voxel in **1.83 s**. A CPU oracle fed
+> assumed inputs is not an oracle. Measure the inputs first, then ask it.
+>
+> The original investigation follows, kept because its plume measurements are sound.
+>
+> **SUPERSEDED (kept for its data):** **The plume's near field collapses, and crown initiation cannot happen because of it.** Measured with `scripts/crown-probe.mjs` for an 8011 kW/m surface fire (SB4, flame depth 4.37 m, $B_0 = 133.4$ — which matches $gQ'/(
 ho c_p T)$ exactly, so the source term is right):
 >
 > | z | $g'$ | $w$ | $b$ | $g'wb$ | $\Delta T_c$ |

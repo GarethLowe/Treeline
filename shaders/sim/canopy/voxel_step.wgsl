@@ -68,6 +68,33 @@ const ST_CROWN_INITIAL: u32 = 3u;
 // convection chain that feeds them.
 const ST_MAX_TEMP: u32 = 4u;
 const ST_WARM_COUNT: u32 = 5u;
+// The convective channel, measured at the voxels instead of inferred from a CPU probe.
+//
+// `crown-probe.mjs` says this plume reaches 636 K on its tilted centreline at crown base and
+// only 349 K directly above the fire, while the GPU's hottest voxel reads 373 K -- i.e. every
+// heated voxel appears to sample the cold side. These two say whether that is true and why:
+// ST_MAX_GAS is the hottest gas ANY occupied voxel sees, and ST_MIN_OFFSET is the closest any
+// of them gets to the tilted centreline. Core found but cold => downstream of convection;
+// never closer than a metre => the core is narrower than the 2 m voxel that must resolve it.
+const ST_MAX_GAS: u32 = 6u;
+const ST_MIN_OFFSET: u32 = 7u;
+// |offset| in centimetres, saturated. atomicMin needs an unsigned distance, so the sign is
+// dropped; the sentinel below is what "no voxel was inside the plume at all" looks like.
+const OFFSET_SCALE: f32 = 100.0;
+const OFFSET_NONE: u32 = 0xffffffffu;
+// Max-gas and max-temp are separate atomics and need not describe the SAME voxel, so on their
+// own they cannot tell "the voxel in the plume core is stalled" from "the core is over bare
+// ground and the warm voxels are elsewhere". These two are gated on one condition, so they do.
+const ST_HOT_GAS_COUNT: u32 = 8u;
+const ST_MAX_TEMP_HOT: u32 = 9u;
+const ST_STALLED: u32 = 10u;
+const HOT_GAS_K: f32 = 800.0;
+// Hot-gas voxels pinned at the water boiling plateau, spending the whole step on evaporation.
+//
+// This is the signature of the 2026-08-21 bug and the cheapest guard against its return: the
+// canopy stepped on the caller's dt while the surface stepped on dt x timeScale, so at the
+// default 8x the crowns got an eighth of the drying time the fire that dried them got. They
+// sat here forever. A run with voxels stalled and none ever igniting is that bug, back.
 const TEMP_SCALE: f32 = 16.0;
 /// 50 K over a 293 K ambient: unambiguously heated by the fire, not by the diurnal cycle.
 const WARM_K: f32 = 343.0;
@@ -202,6 +229,8 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
   let diameter = vparams.particleDiameter;
   let dt = vparams.dt;
 
+  // Set while this step went entirely into evaporation and the voxel stayed at the plateau.
+  var pinnedOnWater = false;
   let heatCapacity = dryMass * SOLID_SPECIFIC_HEAT + charMass * CHAR_SPECIFIC_HEAT +
     (free + bound) * WATER_SPECIFIC_HEAT;
   if (!(heatCapacity > 0.0)) { return; }
@@ -233,12 +262,14 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
       if (toBoil >= dt) {
         temperature = approach(temperature, steady, dt, tau);
       } else {
+        pinnedOnWater = true;
         let pinnedPower = conductance * (gas.tempK - boiling) + radiative;
         let w = evaporateWater(free, bound, pinnedPower * (dt - toBoil));
         free = w.free;
         bound = w.bound;
         temperature = boiling;
         if (w.surplus > 0.0) {
+          pinnedOnWater = false;
           // Bone dry mid-step. Recomputing tau against the now-lighter voxel is what keeps
           // the hand-off energy-consistent.
           let dryCapacity = heatCapacity - (canopy_free_water(v) + canopy_bound_water(v)) * WATER_SPECIFIC_HEAT;
@@ -247,12 +278,14 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
         }
       }
     } else if (hasWater && temperature >= boiling) {
+      pinnedOnWater = true;
       let pinnedPower = conductance * (gas.tempK - temperature) + radiative;
       if (pinnedPower > 0.0) {
         let w = evaporateWater(free, bound, pinnedPower * dt);
         free = w.free;
         bound = w.bound;
         if (w.surplus > 0.0) {
+          pinnedOnWater = false;
           let dryCapacity = heatCapacity - (canopy_free_water(v) + canopy_bound_water(v)) * WATER_SPECIFIC_HEAT;
           let dryTau = max(dryCapacity, 1e-9) / conductance;
           temperature = approach(temperature, steady, w.surplus / pinnedPower, dryTau);
@@ -321,6 +354,13 @@ fn step(@builtin(global_invocation_id) gid: vec3u) {
   atomicAdd(&voxelStats[ST_CROWN_INITIAL], u32(max(initialDry, 0.0) * CROWN_MASS_SCALE));
   atomicMax(&voxelStats[ST_MAX_TEMP], u32(max(temperature, 0.0) * TEMP_SCALE));
   if (temperature >= WARM_K) { atomicAdd(&voxelStats[ST_WARM_COUNT], 1u); }
+  atomicMax(&voxelStats[ST_MAX_GAS], u32(max(gas.tempK, 0.0) * TEMP_SCALE));
+  atomicMin(&voxelStats[ST_MIN_OFFSET], u32(min(abs(gas.offsetM) * OFFSET_SCALE, 4.2e9)));
+  if (gas.tempK >= HOT_GAS_K) {
+    atomicAdd(&voxelStats[ST_HOT_GAS_COUNT], 1u);
+    atomicMax(&voxelStats[ST_MAX_TEMP_HOT], u32(max(temperature, 0.0) * TEMP_SCALE));
+    if (pinnedOnWater) { atomicAdd(&voxelStats[ST_STALLED], 1u); }
+  }
 
   // --- Write back ----------------------------------------------------------
   // f16 saturates at 65504 and temperature never approaches it, but a NaN here would poison
@@ -342,4 +382,9 @@ fn clearStats() {
   atomicStore(&voxelStats[ST_CROWN_INITIAL], 0u);
   atomicStore(&voxelStats[ST_MAX_TEMP], 0u);
   atomicStore(&voxelStats[ST_WARM_COUNT], 0u);
+  atomicStore(&voxelStats[ST_MAX_GAS], 0u);
+  atomicStore(&voxelStats[ST_MIN_OFFSET], OFFSET_NONE);
+  atomicStore(&voxelStats[ST_HOT_GAS_COUNT], 0u);
+  atomicStore(&voxelStats[ST_MAX_TEMP_HOT], 0u);
+  atomicStore(&voxelStats[ST_STALLED], 0u);
 }

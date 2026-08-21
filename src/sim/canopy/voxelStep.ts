@@ -155,8 +155,17 @@ export const CROWN_MASS_SCALE = 64
 /** Fixed-point scale for the voxel temperature diagnostic, shared with the WGSL. */
 export const TEMP_SCALE = 16
 
-/** flaming, everIgnited, crownDry, crownInitial, maxTemp, warmCount. */
-const STAT_SLOTS = 6
+/** Fixed-point scale for the centreline-offset diagnostic (centimetres), shared with the WGSL. */
+export const OFFSET_SCALE = 100
+
+/** `atomicMin` sentinel: no occupied voxel was inside the plume LUT at all. */
+export const OFFSET_NONE = 0xffffffff
+
+/**
+ * flaming, everIgnited, crownDry, crownInitial, maxTemp, warmCount, maxGas, minOffset,
+ * hotGasCount, maxTempInHotGas, stalledAtBoiling.
+ */
+const STAT_SLOTS = 11
 const WORKGROUP = 64
 
 export class CanopyVoxelStep {

@@ -12,6 +12,11 @@
  *
  * Prints the gas temperature a crown-base voxel sees, the heat it receives by each channel,
  * and whether it reaches its ignition gate.
+ *
+ * **Feed it measured inputs or it is not an oracle.** Every constant below that describes the
+ * fire or its field must come from a `?debug` probe line on a real GPU. Answering "no" from an
+ * assumed input looks exactly like answering "no" from the physics, and in August 2026 it cost
+ * three sessions: see the RESOLVED note in docs/spec/30-canopy-heat-crown.md 7.5.
  */
 
 import { solvePlume, buildPlumeLut, samplePlumeLut, PLUME_LUT_TOP_M } from '../src/sim/canopy/convection/plume.ts'
@@ -85,8 +90,12 @@ console.log(`  ignition gate   ${voxel.ignitionK.toFixed(1)} K`)
 const env = {
   gasTemperatureK: K(gasK),
   convectiveCoefficient: h,
-  // Measured from the headless probe at 8 m AGL under this fire.
-  irradiance: 53250,
+  // Measured from the headless probe at 8 m AGL under this fire. 53250 stood here until
+  // 2026-08-21 and was wrong by 20x -- the ?debug canopy probe reports "irradiance peak 2.49
+  // kW/m2". That single unmeasured input is what made this script answer NO IGNITION and sent
+  // three sessions after a plume that was working. If you change a number here, take it from a
+  // probe line, not from an estimate.
+  irradiance: 2490,
   extinction: 0.5 * LAD,
   leafAreaDensity: LAD,
   particleDiameter: PARTICLE_D,

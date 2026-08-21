@@ -11,7 +11,7 @@ Completed episodes — what broke and what it taught — live in [docs/HISTORY.m
 | **M0b — Toolchain** | Complete. Node 24 + Vite + strict TS + Vitest. |
 | **M1 — Walkable world** | Complete and integrated. Boots end to end on a real GPU. |
 | **M2 — Surface fire solver** | Complete and reconciled. GR2 D2L2 reproduces published ROS to 0.32%; the GPU intensity field agrees with the CPU oracle to 1.3%. |
-| **M3 — Canopy, crown fire, firebrands** | Composed and GPU-verified. Emitters -> radiation -> voxel kinetics runs end to end. |
+| **M3 — Canopy, crown fire, firebrands** | Composed and GPU-verified. **The canopy now ignites** — 112 voxels flaming, 412 ever ignited under an SB4 fire. |
 | **M4 — Volumetric fire and smoke** | In progress. Smoke field, blackbody colour, froxel march/composite and ground burn scars are in and GPU-verified. |
 | **M5 — Meteorology and biomes** | In progress. WP 5.2 (Canadian FWI) in, `calibrated`. WP 5.1 solar `validated` from M1. Five packages remain. |
 | **M6** | Not started. Work packages in `docs/spec/90-workpackages.md`. |
@@ -25,6 +25,32 @@ Whole repo, as of 2026-08-20: **0 type errors, 1742 tests passing / 1 skipped, 5
 cases green (21 of them `published`), `?debug` PASS with no GPU errors, 25 WGSL modules
 compiling clean.**
 
+### Crown fire works — the canopy was on the wrong clock (2026-08-21)
+
+For three sessions the 3D canopy would not ignite under any surface fire, and two sessions
+blamed the convective plume. It was neither the plume nor the physics: `FireSim.step` consumes
+`timeScale` as substeps and advances the world by `scale x dt`, while its callers passed their
+own unscaled `dt` to `canopy.step` and `smoke.step`. Both are `Seconds`, so nothing could catch
+it. At the default 8x the canopy got an eighth of the drying time the fire drying it got, and
+crowns sat pinned at the water boiling plateau forever.
+
+`FireSim.step` now returns the time it advanced and the callers pass that on. Same GPU, same
+fire: 0 -> **112 voxels flaming, 412 ever ignited**, hottest voxel 373.1 K -> **998.3 K**.
+
+- Post-mortem and the three lessons: [docs/HISTORY.md](docs/HISTORY.md).
+- The retraction of the plume diagnosis, and the two plume defects that are still real but were
+  never the cause: `docs/spec/30-canopy-heat-crown.md` 7.5.
+- Guarded by a source-text test in `test/app/fire.test.ts` — verified to fail when the bug is
+  reintroduced. Nothing else can catch it: both values type-check, and stepping any of this
+  needs a GPU.
+- `?debug` now reports the convective channel per voxel (hottest gas at a voxel, closest
+  approach to the plume centreline, and how many voxels are stalled at the plateau). Many
+  stalled with nothing igniting is this bug, back.
+
+**`crown-probe.mjs` carried an irradiance 20x too high** (53 kW/m2 against the probe's measured
+2.49) and that single unmeasured input is what made it answer NO IGNITION. It is corrected. If
+you change a number in it, take it from a `?debug` line, not from an estimate.
+
 ### Next, in order
 
 1. **Owner: load `http://127.0.0.1:5173` in your own Chrome and look at the grass.** Phase 2's
@@ -34,6 +60,8 @@ compiling clean.**
    rung at a time, owner looks between rungs.
 3. **Finish M4** — temporal reprojection, fire lighting the scene, near-field flames,
    tree/grass burn state. Resume after phase 3 rung 2.
+   Note that nothing renders a crowning canopy yet: the voxels burn but the draw path still
+   shows surface flames only, so this fix is not yet visible to the owner.
 4. M5's remaining five packages, then M6.
 
 ### Running it

@@ -69,6 +69,10 @@ const CB_COEFF_PR070 : f32 = 0.4829200425;
 struct GasState {
   tempK : f32,
   speed : f32,
+  // Signed distance from the TILTED centreline, along the wind axis [m]. Diagnostic only:
+  // the plume core at crown base is narrower than a 2 m voxel, so "how close did any voxel
+  // get" is the difference between a wiring bug and a resolution limit.
+  offsetM : f32,
 }
 
 // Sample the plume at `heightM` above the source and `acrossM` downwind of it, measured along
@@ -80,7 +84,9 @@ fn plumeGasState(heightM : f32, acrossM : f32) -> GasState {
   let ambientT = plume.params.w;
   let wind = plume.params.z;
   if (heightM < 0.0 || heightM > PLUME_LUT_TOP_M) {
-    return GasState(ambientT, abs(wind));
+    // Outside the LUT there is no centreline to be near; the sentinel keeps this row out of
+    // any min-offset diagnostic rather than reporting a spurious zero.
+    return GasState(ambientT, abs(wind), 1e9);
   }
   let f = (heightM / PLUME_LUT_TOP_M) * (PLUME_LUT_ROWS - 1.0);
   let i0 = min(u32(floor(f)), u32(PLUME_LUT_ROWS) - 2u);
@@ -97,7 +103,7 @@ fn plumeGasState(heightM : f32, acrossM : f32) -> GasState {
   let gaussV = exp(-s2 / (b * b));
   let gaussT = exp(-s2 / (PLUME_LAMBDA * PLUME_LAMBDA * b * b));
   let wLocal = w * gaussV;
-  return GasState(ambientT + dTc * gaussT, length(vec2<f32>(wLocal, wind)));
+  return GasState(ambientT + dTc * gaussT, length(vec2<f32>(wLocal, wind)), s);
 }
 
 // Convenience: world-space voxel centre -> gas state, using the source position and wind axis
