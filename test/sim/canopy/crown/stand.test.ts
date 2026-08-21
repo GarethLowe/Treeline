@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { expectWithinBudget } from '../../../perfBudget.ts'
 import { kgm3, m, moistureFraction } from '@contracts/units.ts'
 import { aggregateStand } from '@sim/canopy/crown/stand.ts'
 import type { CrownStem } from '@sim/canopy/crown/stand.ts'
@@ -89,8 +90,7 @@ describe('aggregateStand', () => {
     const s = aggregateStand(stems, kgm3(0.12))
     const ms = performance.now() - t0
     expect(s.canopyBaseHeight).toBeGreaterThan(0)
-    expect(ms).toBeLessThan(50) // generous; this runs once at world load, not per step
-    // eslint-disable-next-line no-console
-    console.log(`aggregateStand(50k stems): ${ms.toFixed(3)} ms`)
+    // Generous; this runs once at world load, not per step.
+    expectWithinBudget('aggregateStand(50k stems)', ms, 50, 'ms')
   })
 })

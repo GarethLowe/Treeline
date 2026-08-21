@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { expectWithinBudget } from '../../../perfBudget.ts'
 import { K, kWm, m } from '@contracts/units'
 import {
   ALPHA_E_GAUSSIAN_LINE,
@@ -340,8 +341,6 @@ describe('cost', () => {
     const t0 = performance.now()
     for (let i = 0; i < reps; i++) buildPlumeLut(solvePlume(src, env, { topM: 512, steps: 512 }))
     const us = ((performance.now() - t0) / reps) * 1000
-    // eslint-disable-next-line no-console
-    console.log(`plume solve + LUT build: ${us.toFixed(1)} us`)
-    expect(us).toBeLessThan(100)
+    expectWithinBudget('plume solve + LUT build', us, 100, 'us')
   })
 })

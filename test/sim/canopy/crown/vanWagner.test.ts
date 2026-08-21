@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import { expectWithinBudget } from '../../../perfBudget.ts'
 import { kWm, kgm3, m, moistureFraction, mps } from '@contracts/units.ts'
 import type { KilowattsPerMetre, MetresPerSecond } from '@contracts/units.ts'
 import {
@@ -354,9 +355,7 @@ describe('cost', () => {
     expect(sink).toBeGreaterThan(0)
     // Generous: the point is that even 100x this is invisible against a 16.6 ms frame at the
     // once-per-canopy-step rate this actually runs at. CI machines are slow and variable.
-    expect(nsPerCall).toBeLessThan(5000)
-    // eslint-disable-next-line no-console
-    console.log(`evaluateCrownFire: ${nsPerCall.toFixed(0)} ns/call`)
+    expectWithinBudget('evaluateCrownFire', nsPerCall, 5000, 'ns/call')
   })
 })
 
