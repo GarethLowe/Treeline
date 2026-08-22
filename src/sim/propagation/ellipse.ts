@@ -251,4 +251,3 @@ export function alphaY(e: FireEllipse): number {
 // Provenance
 // ---------------------------------------------------------------------------
 
-

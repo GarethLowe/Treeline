@@ -15,8 +15,6 @@
  *     into the frustum and are unit length after extraction.
  */
 
-
-
 /** Plane order in the packed array. Matches `FrameUniform.frustum` in layout.ts. */
 export const PLANE_LEFT = 0
 export const PLANE_RIGHT = 1

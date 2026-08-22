@@ -108,7 +108,7 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 
 ### 7.5 Convection
 
-> **CLOSED 2026-08-21 - the canopy was running on a different clock from the fire.** The
+> **CLOSED 2026-08-22 - the canopy was running on a different clock from the fire.** The
 > investigation kept below reached the wrong conclusion, and the correction matters more than
 > the investigation did: **the plume was never why the canopy would not ignite.**
 >
@@ -141,7 +141,7 @@ Cone tracing is chosen because cost is independent of emitter count, it preserve
 > modelling defects remain; they were simply not the cause of non-ignition, and neither is
 > urgent now that crowns ignite:
 >
-> 1. **DONE 2026-08-21.** `solvePlume` now starts at the flame tip: Byram flame length gives
+> 1. **DONE 2026-08-22.** `solvePlume` now starts at the flame tip: Byram flame length gives
 >    the height, 7.4's flame-sheet value gives the source temperature, the flaming zone's depth
 >    gives $b_0$, and $w_0$ follows from buoyancy-flux conservation
 >    ($g'wb = F k_\lambda/(\lambda\sqrt{\pi})$) rather than being chosen. No new constant, so

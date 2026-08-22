@@ -88,9 +88,6 @@ export class StageTracker {
     return STAGES.map((s) => this.#records.get(s.id) as StageRecord)
   }
 
-
-
-
   begin(id: StageId): void {
     this.#started.set(id, this.#now())
     this.#patch(id, { state: 'running' })

@@ -130,5 +130,3 @@ export function compositionOf(totalMass: number, ecMass: number): number {
   return Math.min(1, Math.max(0, ecMass / totalMass))
 }
 
-
-

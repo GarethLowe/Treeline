@@ -22,7 +22,6 @@
  * chromaticities, which is what actually pins the model down.
  */
 
-
 /** Planck's first radiation constant for spectral radiance, 2hc², W m² sr⁻¹. */
 export const C1L = 1.1910429e-16
 /** Planck's second radiation constant, hc/k_B, m K. */

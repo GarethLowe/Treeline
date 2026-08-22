@@ -5,7 +5,6 @@
  * in flight. If you believe something is wrong, stop and report rather than editing.
  */
 
-
 // ---------------------------------------------------------------------------
 // Device
 // ---------------------------------------------------------------------------
@@ -39,7 +38,6 @@ export interface AdapterReport {
   /** Requested limits the adapter could not satisfy. Empty on the target hardware. */
   readonly limitShortfalls: readonly { readonly limit: string; readonly wanted: number; readonly got: number }[]
 }
-
 
 // ---------------------------------------------------------------------------
 // Profiling
@@ -107,7 +105,6 @@ export const QUALITY_TABLE: readonly QualitySettings[] = [
   { resolutionScale: 1.0, froxelMarchSteps: 96, nearFieldParticleBudget: 320_000, radiationRays: 32 },
   { resolutionScale: 1.0, froxelMarchSteps: 128, nearFieldParticleBudget: 640_000, radiationRays: 32 },
 ]
-
 
 // ---------------------------------------------------------------------------
 // Frame loop

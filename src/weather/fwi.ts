@@ -18,7 +18,6 @@
  * boundary is `FwiObservation`: SI stops there and the caller converts.
  */
 
-
 /** Noon-LST observation. Units as the FWI system defines them; see the header. */
 export interface FwiObservation {
   /** Dry-bulb temperature, °C. */
@@ -231,5 +230,4 @@ export function fwiToSizeClassMoisture(codes: FwiCodes): {
     dead1000h: deep,
   }
 }
-
 

@@ -82,7 +82,6 @@ export class CanopyRadiation {
   /** m^-1, 4 m grid. Static after `buildExtinction`. */
   readonly extinction: GPUTexture
 
-
   private readonly shaderOptions: RadiationShaderOptions
   private readonly device: GPUDevice
   private clusterBindGroupLayout: GPUBindGroupLayout | null = null

@@ -5,7 +5,7 @@ What was tried, what broke, and what the failure taught. Kept out of
 
 Every section here is a completed episode. Nothing in this file is a to-do.
 
-## The canopy was on a different clock from the fire, 2026-08-21
+## The canopy was on a different clock from the fire, 2026-08-22
 
 **Symptom, for three sessions:** the 3D canopy would not ignite under any surface fire. Van
 Wagner's curve read 94 % crown fraction burned on a stand where the voxel field reported
@@ -424,7 +424,7 @@ options bags, boot stages and bench report; 1.9's test posture.
 
 ---
 
-# Moved out of HANDOFF.md, 2026-08-21
+# Moved out of HANDOFF.md, 2026-08-22
 
 HANDOFF.md had grown to 655 lines against its own 150-line rule, and the cost was not only
 length: it asserted in one place that the scene had no cast shadows and in another that sun
@@ -559,7 +559,7 @@ them, and Van Wagner crown initiation reads the same field. The M3 probe's "irra
 5.93 kW/m2 over 3826/4096 cells" was measured under the old behaviour — **re-measure it**, the
 irradiated fraction should fall a long way.
 
-> **[LATER] Re-measured 2026-08-21: peak 2.49 kW/m2 over 3295/4096 cells.** Both fell, as
+> **[LATER] Re-measured 2026-08-22: peak 2.49 kW/m2 over 3295/4096 cells.** Both fell, as
 > predicted. Worth knowing that the stale 53 kW/m2 hard-coded in `crown-probe.mjs` was never
 > either figure, and sent three sessions after a plume bug that did not exist.
 

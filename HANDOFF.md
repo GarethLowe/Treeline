@@ -4,6 +4,51 @@ Read [SPEC.md](SPEC.md) first, then [CLAUDE.md](CLAUDE.md) for how this project 
 Completed episodes — what broke and what it taught — live in [docs/HISTORY.md](docs/HISTORY.md).
 This file is the **present tense only**. If a thing is finished, it belongs in HISTORY.
 
+## ⏸ PARKED — 2026-08-22
+
+**Stopped by the owner, and not because it stopped working.** The simulation is in the best
+shape it has been in; the *thing being built* is not what the owner wants. In their words: the
+spec was over-specified into procedural accuracy, and what the screen actually shows is a smoky
+mess. The target is Far Cry 2/3 fire, enhanced — not a validated wildfire simulator.
+
+That is a fair read of the evidence and not a change of taste. Every session this month was
+spent on physical correctness, and each fix was real: crown fire ignites, smoke rises, the fuel
+bed is heterogeneous, the clocks agree. None of it made the picture better, because the picture
+was never the thing being worked on.
+
+**Do not resume from this file's "Next, in order".** It orders work for the old goal. Anything
+below it is still accurate as a description of what exists — read it as an inventory, not a
+plan.
+
+### The gap, stated plainly
+
+Far Cry 2's fire is not a simulation. It is a cheap propagation rule on a coarse grid, carrying
+excellent art: dense particles, strong emissive lighting that visibly changes the scene, heat
+shimmer, wind-driven embers, and fuel that visibly deforms and blackens. Its convincingness is
+almost entirely in the presentation layer.
+
+That is precisely the layer this project has least of, and it is not an accident — the
+scientific work was specified first and the rendering was scheduled behind it. The four things
+that most separate this from the reference are all still unbuilt: **fire lighting the scene**
+(WP 4.4), **bloom**, **TAA**, and a **sun-transmittance volume** so smoke is not a flat grey
+wash. The soot yield that sets smoke opacity is `estimated` against an unread source, which is
+why the plume reads as fog.
+
+### What carries over to a Far Cry-shaped goal
+
+Worth keeping whatever the new specification says: terrain synthesis, vegetation placement and
+species, procedural tree geometry, the material and foliage renderers, the sun-occlusion pass,
+the volumetric froxel march, the flame billboards, `?debug`'s probe discipline, the headless
+runner, and the seeded reproducible world.
+
+Probably over-built for it: Rothermel validated to 0.32 %, the Canadian FWI transcription, the
+provenance and validation-status machinery, canopy voxel kinetics at 1.2 M voxels, and the
+firebrand transport model. None of that is wrong — it is precision the target does not spend.
+
+The propagation solver is the interesting middle case. A narrow-band level set on a 0.5 m grid
+is more than a game needs, but it is built, it is fast, and it produces a believable perimeter
+shape. Keeping it and cheapening what feeds it would be a defensible starting point.
+
 ## Where things stand
 
 | Milestone | State |
@@ -12,69 +57,54 @@ This file is the **present tense only**. If a thing is finished, it belongs in H
 | **M0b — Toolchain** | Complete. Node 24 + Vite + strict TS + Vitest. |
 | **M1 — Walkable world** | Complete and integrated. Boots end to end on a real GPU. |
 | **M2 — Surface fire solver** | Complete and reconciled. GR2 D2L2 reproduces published ROS to 0.32%; the GPU intensity field agrees with the CPU oracle to 1.3%. |
-| **M3 — Canopy, crown fire, firebrands** | Two channels of three. **The canopy ignites, is drawn, and consumes its foliage** — 551 voxels flaming, 3,249 stems with crown consumption. **Firebrands are inert**, below. |
+| **M3 — Canopy, crown fire, firebrands** | Two channels of three. **The canopy ignites, is drawn, and consumes its foliage** — 551 voxels flaming, 3,249 stems with crown consumption. **Firebrands are switched off**, below. |
 | **M4 — Volumetric fire and smoke** | In progress. Smoke field, blackbody colour, froxel march/composite, ground burn scars, near-field flames and tree/grass char are in and GPU-verified. Gaps below. |
 | **M5 — Meteorology and biomes** | In progress. WP 5.2 (Canadian FWI) in, `calibrated`. WP 5.1 solar `validated` from M1. Five packages remain. |
 | **M6** | Not started. Work packages in `docs/spec/90-workpackages.md`. |
 | **Cleanup phases 1 and 2** | Done. Four phase-1 items skipped after inspection; see HISTORY. |
 | **Cleanup phase 3** | Rung 1 (sun occlusion) in and GPU-verified. Rungs 2–4 (TAA, bloom, smoke self-shadowing) remain. |
 
-Whole repo, as of 2026-08-21: **0 type errors, 1777 tests passing / 1 skipped, 51 validation
-cases green (21 of them `published`), `?debug` PASS with no GPU errors.**
-
-**Owner review pending.** A session of visual work is in and unreviewed: crown flames, the
-depth-aware smoke upsample, plume source conditions, smoke lift, the flame growth envelope and
-foliage consumption. All GPU-verified and green, none judged by eye yet.
+Whole repo, as of 2026-08-22: **0 type errors, 1799 tests passing / 1 skipped, 51 validation
+cases green (21 of them `published`), `?debug` PASS with no GPU errors.** Frame cost after the
+cadence change: surface 0.034 ms, canopy 0.061 ms, 1.1 ms GPU total.
 
 ### Next, in order
 
-Reordered 2026-08-21 after a session of sim fixes and an external review. The theme: the
-simulation is now internally consistent, and the largest remaining gaps are couplings that were
-never closed rather than models that were never written.
+1. **Owner: look at it.** Two sessions of unjudged work — crown flames, foliage consumption,
+   the depth-aware smoke upsample, rising smoke, a flame growth envelope, a default clock of
+   2x, and now a heterogeneous fuel bed that makes the conifer biome burn as litter rather
+   than grass. `npm run dev`, right-click to ignite. Opinions wanted on crown billboard
+   density (`CROWN_FLAME_KEEP`, currently 0.35) and on whether 2x is the right default.
 
-1. **Owner: look at it.** A session of visual work is in and unjudged — crown flames, foliage
-   consumption, the depth-aware smoke upsample, rising smoke, the flame growth envelope, and a
-   default clock of 2x instead of 8x. `npm run dev` then `?fuel=SB4&wind=6`, right-click to
-   ignite. Two things to form an opinion on specifically: crown billboard density, thinned to
-   35 % and trivially retuned via `CROWN_FLAME_KEEP`; and whether 2x is the right default.
+2. **Close the crown-fire loop, or decide not to.** The last open coupling. The surface heats
+   the canopy, the canopy reports what burned, and that measurement changes nothing: it does
+   not alter lateral spread, seed canopy emitters, or ignite surface cells ahead of the front,
+   so the 3D solver is a diagnostic. The cheap defensible route is to drive spread from the
+   empirical Van Wagner/Cruz transition already implemented and keep the voxel field as the
+   higher-fidelity layer until it demonstrably does better. A project-shape decision, not a bug.
 
-2. **Make the fire read the world.** The top sim gap, its own section below. Blocked on one
-   decision that is the owner's: **what counts as non-burnable?** Rock and water are obvious;
-   whether roads, streams or firebreak corridors exist as a layer at all is a design question,
-   and the answer shapes how fire moves through every biome. Everything downstream of that is
-   mechanical — `packCell` already takes per-cell fuel, flags and moisture.
+3. **Delete the ROS bridge.** `FireSim.bridge` copies `ellipseCache` (a storage buffer) into
+   `rosCache` (an rgba16float texture) every update — 8 B/cell over 4.19 M cells, **33.5 MB
+   copied between byte-identical representations**, plus 33.5 MB of VRAM for the destination.
+   `propagation.wgsl` reads it **only** through `textureLoad` and never samples it, so the
+   texture buys nothing the buffer does not already have. Bind the buffer at group 0 binding 7
+   as `array<vec2<u32>>` and unpack with `unpack2x16float`; `stub.ts` needs the same treatment
+   for its standalone path. Verified 2026-08-22, not started: it touches a GPU bind group and
+   the diff it belongs with was already large.
 
-3. **Firebrands: wire them or switch them off.** They have never spawned a brand, and the loop
-   is open at both ends — no emitter source, and no consumer for the ignition mask. Wiring
-   needs a GPU emitter gather over flaming canopy voxels (`csGatherCanopy` in `flames.wgsl` is
-   the shape to copy) plus a published mass-loss field, and the brand constants are unsourced
-   besides. An honest `estimated` subsystem that runs is worth more than a dead one; a dead one
-   that reports zeros is worth less than nothing, which is why it now says NOT WIRED.
+4. **Per-cell moisture.** The fuel bed is now heterogeneous in MODEL but uniform in moisture.
+   That is M5's field and the honest place for it; deriving one from shade or aspect today
+   would be a physical claim with nothing behind it.
 
-4. **Decide the crown-fire path.** Crown fire is one-way: the surface heats the canopy, the
-   canopy reports what burned, and that measurement changes nothing. It does not alter lateral
-   spread, seed canopy emitters, or ignite surface cells ahead of the front. The 3D solver is
-   therefore a diagnostic. The cheap, defensible route is to drive spread from the empirical
-   Van Wagner/Cruz transition that is already implemented and keep the voxel field as the
-   higher-fidelity layer until it demonstrably does better. That is a project-shape decision,
-   not a bug.
-
-5. **Reconsider the 120 Hz substep.** `DEFAULT_FIXED_DT = 1/120` against a spec that asks for
-   2–10 Hz on a 0.5 m grid; `radiation/layout.ts` already records this as sixteen times what
-   §7.4 wants. Two sim steps per frame at 60 fps, each carrying a 2048² burnout pass, a
-   256×256×64 smoke pass and ~1.2 M voxel updates. Cutting it is what makes high time scales
-   affordable, and cadence is now safe to change: `probeClockEquivalence` will say if it
-   breaks coupling.
-
-6. **Then the visual ladder** — TAA with WP 4.3 (they share jitter and motion vectors), bloom,
-   fire lighting, smoke self-shadowing. Deliberately below the couplings: these make a correct
+5. **Then the visual ladder** — TAA with WP 4.3 (they share jitter and motion vectors), bloom,
+   fire lighting, smoke self-shadowing. Below the couplings deliberately: these make a correct
    fire look better, and none of them makes a wrong fire right.
 
 **Open question worth answering before more engine work:** an external review argues the
-project has locked scope — five biomes, full meteorology, 1 km² at 0.5 m, 1440p/60 — before
-proving a vertical slice, and that the interaction model is an engineering control panel rather
-than anything playable. That is a fair reading of `docs/spec/00-overview.md` §0.2's locked
-decisions. Whether to relitigate them is the owner's call and nobody else's.
+project locked scope — five biomes, full meteorology, 1 km² at 0.5 m, 1440p/60 — before proving
+a vertical slice, and that the interaction model is an engineering control panel rather than
+anything playable. That is a fair reading of `docs/spec/00-overview.md` §0.2's locked decisions.
+Whether to relitigate them is the owner's call and nobody else's.
 
 ### Running it
 
@@ -113,27 +143,29 @@ the owner can actually see, which is the order CLAUDE.md says to work in:
   place at the same time scorch does — one band becomes two.
 - **No TAA**, so foliage shimmers; both draw paths already emit dither assuming TAA resolves it.
 
-**Firebrands (WP 3.6) have never spawned a single brand**, and have not since the milestone was
-called composed — see item 3 above for what wiring costs. `FirebrandSystem.setEmitters` has no
-caller in `src/`, and the ignition mask the brand shader writes has no consumer, so the loop is
-open at both ends. Its own comment says why the near end is open: brands need a mass-loss rate
-per source and `IFireOutputs` publishes none.
+**Firebrands (WP 3.6) are switched off at the frame loop** and have never spawned a brand.
+`FirebrandSystem.setEmitters` has no caller in `src/` and the ignition mask the brand shader
+writes has no consumer, so the loop is open at both ends and running it integrated an empty
+pool at frame rate to produce zeros — which is also exactly what a working spotting model
+reports on a fire not throwing embers. `FIREBRANDS_ENABLED` in `app/canopy.ts` turns it back
+on, and should be flipped in the same change that supplies emitters AND consumes the mask, not
+before. Its constants are unsourced besides, so a wired subsystem would still be `estimated`.
 
-## The top sim gap: the world the player sees is not the world the fire reads
+## What the fire now reads
 
-`FireSim.writeFuelBed` fills **every one of the 4.19 M surface cells** with a single `packCell`
-word — one fuel model id, one flag set, one moisture vector — via `this.#plane.fill(...)`, with
-the model coming from `dominantFuelModel`, the mix-weighted dominant species for the whole
-domain. Verified against the source 2026-08-21, from an external review.
+The surface bed is per-cell, rasterised from `UnderstoryField`'s canopy closure and understory
+cover — both already computed at world build — through each species' own `surfaceFuelModel`.
+Closed canopy takes the stand's litter model, open ground the cover species', and a cell with
+neither is non-burnable, which is fuel model id 0 and was already in the LUT. Measured on the
+shipping conifer world: **TL8 58.2 %, GR2 41.8 %**, against an independent 61 % canopy cover
+from the sun-occlusion pass.
 
-So the world carries species, allometry, terrain-dependent placement and five biomes, and the
-solver reads a uniform sheet. A tree, a clearing, a grass patch and bare ground all carry
-identical fire, and the fire cannot find a corridor, a break or a fuel discontinuity because
-none is expressed. It is the difference between five biomes and five colour schemes.
+An explicit `?fuel=` override still writes a uniform bed, which is what a controlled comparison
+and every published benchmark want.
 
-`packCell` already takes a per-cell `fuelModelId`, per-cell flags including non-burnable, and a
-per-cell moisture vector, and every species already carries a `surfaceFuelModel` (§20 §4.3).
-Only the SOURCE is uniform. See item 2 above for what is blocked on whom.
+Still uniform, deliberately: **moisture**, which is M5's field, and **load**, because the
+surface shaders never read `packCell`'s `mass` fields — they are packed and never sampled, so
+scaling them would look like heterogeneity and change nothing.
 
 ## Still to do
 
@@ -217,7 +249,7 @@ Full text in `docs/spec/00-overview.md` §0.2, §0.6 and §0.7. The ones that ge
    `msedgewebview2.exe` under `HKCU:\Software\Microsoft\DirectX\UserGpuPreferences`, or use
    your own Chrome. The pane may also not composite at all, in which case
    `requestAnimationFrame` never fires and boot reports "First frame — skipped".
-2. **`npm run headless` gets the DISCRETE adapter on this machine** — measured 2026-08-21,
+2. **`npm run headless` gets the DISCRETE adapter on this machine** — measured 2026-08-22,
    `nvidia / blackwell`, `discrete (as requested)`. CLAUDE.md says otherwise; it described a
    different machine. **The adapter line the runner prints every run is the only authority**,
    and a real measurement discarded on the strength of either note is discarded wrongly.

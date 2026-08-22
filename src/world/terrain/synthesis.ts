@@ -79,7 +79,6 @@ function mainFbmFor(cellM: number): FbmConfig {
   return { octaves, lacunarity: FBM_LACUNARITY, gain: FBM_GAIN }
 }
 
-
 /**
  * Target vertical span (p01..p99) in metres for a relief setting.
  *

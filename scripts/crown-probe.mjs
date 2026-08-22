@@ -91,7 +91,7 @@ const env = {
   gasTemperatureK: K(gasK),
   convectiveCoefficient: h,
   // Measured from the headless probe at 8 m AGL under this fire. 53250 stood here until
-  // 2026-08-21 and was wrong by 20x -- the ?debug canopy probe reports "irradiance peak 2.49
+  // 2026-08-22 and was wrong by 20x -- the ?debug canopy probe reports "irradiance peak 2.49
   // kW/m2". That single unmeasured input is what made this script answer NO IGNITION and sent
   // three sessions after a plume that was working. If you change a number here, take it from a
   // probe line, not from an estimate.

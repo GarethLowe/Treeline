@@ -91,7 +91,7 @@ const ST_STALLED: u32 = 10u;
 const HOT_GAS_K: f32 = 800.0;
 // Hot-gas voxels pinned at the water boiling plateau, spending the whole step on evaporation.
 //
-// This is the signature of the 2026-08-21 bug and the cheapest guard against its return: the
+// This is the signature of the 2026-08-22 bug and the cheapest guard against its return: the
 // canopy stepped on the caller's dt while the surface stepped on dt x timeScale, so at the
 // default 8x the crowns got an eighth of the drying time the fire that dried them got. They
 // sat here forever. A run with voxels stalled and none ever igniting is that bug, back.

@@ -279,7 +279,7 @@ fn march(@builtin(global_invocation_id) gid: vec3u) {
 /// BINARY between adjacent texels, and no amount of bilinear filtering rescues a signal that
 /// is already wrong at source — it just ramps between the two wrong answers. On screen the
 /// smoke appeared as hard axis-aligned squares roughly 8 x 6 px, one per froxel column, as
-/// though it were being viewed through a stencil. Reported 2026-08-21; unoccluded smoke looked
+/// though it were being viewed through a stencil. Reported 2026-08-22; unoccluded smoke looked
 /// correct the whole time, which is what made it read as a resolution problem rather than a
 /// depth one.
 ///
