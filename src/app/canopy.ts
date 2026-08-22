@@ -36,8 +36,13 @@ const STATS_BYTES = 44
 import { PLUME_UNIFORM_BYTES, packPlumeUniforms } from '@sim/canopy/convection/plume.ts'
 import { buildPlumeLut, solvePlume } from '@sim/canopy/convection/plume.ts'
 
-
 import { FirebrandSystem } from '@sim/firebrands/system.ts'
+
+/**
+ * WP 3.6 off at the frame loop. See the note at its dispatch for why, and what turning it
+ * back on requires. Not a quality setting — a statement that the subsystem is incomplete.
+ */
+const FIREBRANDS_ENABLED = false
 import type { IFireOutputs } from '@contracts/sim'
 import { MAX_SIM_SUBSTEP_S } from '@contracts/sim'
 
@@ -339,7 +344,17 @@ export class CanopySim {
     const subs = Math.max(1, Math.ceil((dt as number) / MAX_SIM_SUBSTEP_S))
     const subDt = seconds((dt as number) / subs)
     for (let i = 0; i < subs; i++) this.voxels.encode(encoder, subDt)
-    this.firebrands.step(encoder, dt, surface)
+    // WP 3.6 is NOT dispatched. It has never spawned a brand — `setEmitters` has no caller
+    // anywhere in src/, and the ignition mask its shader writes has no consumer, so the loop
+    // is open at both ends and running it integrates an empty pool at frame rate to produce
+    // zeros. Its constants are unsourced besides (ember half-thickness, the drag
+    // coefficients), so a wired version would still be `estimated`.
+    //
+    // Switched off rather than deleted: the transport, burnout and ignition machinery is real
+    // work and the gap is the wiring. `FirebrandSystem.hasEverHadEmitters` keeps the HUD
+    // honest about which of the two states this is. Turn this back on in the same change that
+    // supplies emitters AND consumes the mask, not before.
+    if (FIREBRANDS_ENABLED) this.firebrands.step(encoder, dt, surface)
 
     if (!this.readingBack) {
       encoder.copyBufferToBuffer(this.voxels.stats, 0, this.statsStaging, 0, STATS_BYTES)

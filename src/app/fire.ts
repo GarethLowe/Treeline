@@ -54,6 +54,9 @@ import type { SpreadOutputs } from '@contracts/sim.ts'
 import { curingFraction, rothermelSpread } from '@sim/rothermel/kernel.ts'
 import { buildCoefficientLut, type CoefficientLut } from '@sim/surface/coefficients.ts'
 import { FLAG_BURNABLE, PLANE_COUNT, SURFACE_CELL_COUNT } from '@sim/surface/layout.ts'
+import type { SpeciesForm } from '@contracts/world'
+import type { FuelMap, UnderstoryCover } from '@sim/surface/fuelMap.ts'
+import { buildSurfaceFuelMap } from '@sim/surface/fuelMap.ts'
 import { createSurfaceGrid, createSurfaceRosPasses, packCell, type SurfaceGrid, type SurfaceRosPasses } from '@sim/surface/surfacePass.ts'
 import { SurfaceSolver } from '@sim/propagation/solver.ts'
 import { FireOutputs } from '@sim/burnout/outputs.ts'
@@ -87,7 +90,6 @@ export const STUB_WEATHER: SurfaceWeather = {
   },
 }
 
-
 /** Simulated seconds between re-evaluations of the two Rothermel passes. */
 const ROTHERMEL_TICK_S = 1
 
@@ -106,6 +108,17 @@ export interface FireSimOptions {
   readonly stand?: {
     readonly stems: readonly CrownStem[]
     readonly standCrownBulkDensity: KgPerCubicMetre
+  }
+  /**
+   * The world's own vegetation cover, rasterised into a per-cell fuel map.
+   *
+   * Omit and the fuel bed is uniform, which is what an explicit `?fuel=` override wants and
+   * what every published benchmark is quoted at.
+   */
+  readonly fuelMap?: {
+    readonly understory: UnderstoryCover
+    /** Fuel model the understory cover species lays down in the open. */
+    readonly understoryFuelCode: string
   }
 }
 
@@ -161,6 +174,8 @@ export class FireSim {
   timeScale = 1
 
   #fuelModelCode: string
+  /** Per-cell fuel, or null when the bed is a single model over the domain. */
+  readonly #fuelMap: FuelMap | null
   #weather: SurfaceWeather = STUB_WEATHER
   #dirty = true
   #nextTickS = 0
@@ -228,6 +243,15 @@ export class FireSim {
       )
     }
     this.#fuelModelCode = options.fuelModelCode
+    this.#fuelMap =
+      options.fuelMap === undefined
+        ? null
+        : buildSurfaceFuelMap({
+            understory: options.fuelMap.understory,
+            cells: this.cells,
+            canopyFuelId: Math.max(0, this.fuelOrder.indexOf(options.fuelModelCode)),
+            understoryFuelId: Math.max(0, this.fuelOrder.indexOf(options.fuelMap.understoryFuelCode)),
+          })
 
     this.#grid = createSurfaceGrid(device, this.#lut)
     this.#ros = createSurfaceRosPasses(
@@ -255,7 +279,6 @@ export class FireSim {
       rosCache: this.#rosCache,
       ...(options.useSubgroups === undefined ? {} : { useSubgroups: options.useSubgroups }),
     })
-
 
     // Stand geometry is static, so this O(stems) pass runs once here rather than per step —
     // WP 3.5's own header says so and measures it at 2.1 ms for 50,000 stems.
@@ -822,33 +845,70 @@ export class FireSim {
   }
 
   /**
-   * Fill every cell with the current fuel model and moisture.
+   * Write the fuel bed: per-cell where the world supplies a map, uniform otherwise.
    *
-   * ponytail: one fuel model over the whole domain. The upgrade is a per-cell map rasterised
-   * from WP 1.3's stem positions and each species' `surfaceFuelModel` + `litterLoad`, which
-   * is a real piece of work and belongs with M5's fuel-moisture field rather than here. Until
-   * then the fuel bed is uniform, which is also exactly the condition every published
-   * benchmark in `npm run validate` is quoted at.
+   * Moisture is uniform either way. A spatial moisture field is M5's, and deriving one here
+   * from shade or aspect would be a physical claim with nothing behind it.
    *
    * `packCell` is the same packer the GPU test asserts byte offsets against, so this cannot
    * drift from `loadCellState` in `common.wgsl`.
    */
   private writeFuelBed(): void {
     const mo = this.#weather.moisture
-    const words = packCell({
-      fuelModelId: this.fuelModelId,
-      flags: FLAG_BURNABLE,
-      moisture: [mo.dead1h, mo.dead10h, mo.dead100h, mo.liveHerb, mo.liveWoody],
-    })
+    const moisture: [number, number, number, number, number] = [
+      mo.dead1h,
+      mo.dead10h,
+      mo.dead100h,
+      mo.liveHerb,
+      mo.liveWoody,
+    ]
+    const map = this.#fuelMap
+
+    if (map === null) {
+      const words = packCell({ fuelModelId: this.fuelModelId, flags: FLAG_BURNABLE, moisture })
+      for (let p = 0; p < PLANE_COUNT; p++) {
+        this.#plane.fill(words[p] as number)
+        this.#device.queue.writeBuffer(this.#grid.stateWords, p * SURFACE_CELL_COUNT * 4, this.#plane)
+      }
+      this.#dirty = true
+      return
+    }
+
+    // One packCell per DISTINCT id rather than per cell: the map holds a handful of ids over
+    // four million cells, and packing each cell separately would be four million calls to do
+    // the same arithmetic a few times.
+    const cache = new Map<number, [number, number, number]>()
+    for (const id of map.histogram.keys()) {
+      cache.set(id, packCell({ fuelModelId: id, flags: FLAG_BURNABLE, moisture }))
+    }
     for (let p = 0; p < PLANE_COUNT; p++) {
-      this.#plane.fill(words[p] as number)
-      this.#device.queue.writeBuffer(
-        this.#grid.stateWords,
-        p * SURFACE_CELL_COUNT * 4,
-        this.#plane,
-      )
+      for (let c = 0; c < SURFACE_CELL_COUNT; c++) {
+        const words = cache.get(map.fuelIds[c] as number) as [number, number, number]
+        this.#plane[c] = words[p] as number
+      }
+      this.#device.queue.writeBuffer(this.#grid.stateWords, p * SURFACE_CELL_COUNT * 4, this.#plane)
     }
     this.#dirty = true
+  }
+
+  /** What the fuel bed actually holds, for the boot report. */
+  fuelBedReport(): string {
+    const map = this.#fuelMap
+    if (map === null) {
+      return `fuel bed          UNIFORM — ${this.#fuelModelCode} over every cell (explicit override)`
+    }
+    const total = SURFACE_CELL_COUNT
+    const parts = [...map.histogram.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([id, n]) => `${this.fuelOrder[id] ?? `id${id}`} ${((n / total) * 100).toFixed(1)}%`)
+    return [
+      `fuel bed          per-cell from the world's own cover: ${parts.join(', ')}`,
+      `  non-burnable    ${map.nonBurnableCells.toLocaleString()} cells ` +
+        `(${((map.nonBurnableCells / total) * 100).toFixed(1)} %) carry no surface fuel`,
+      map.histogram.size <= 1
+        ? '  UNIFORM ANYWAY — one id over the whole domain; the map is not doing anything.'
+        : '  heterogeneous, so a front meets fuel changes rather than one sheet.',
+    ].join(String.fromCharCode(10))
   }
 }
 
@@ -862,14 +922,23 @@ export class FireSim {
  */
 export function dominantFuelModel(
   speciesMix: Readonly<Record<string, number>>,
-  species: ReadonlyMap<string, { readonly surfaceFuelModel: string }>,
+  species: ReadonlyMap<string, { readonly surfaceFuelModel: string; readonly form?: SpeciesForm }>,
 ): string {
   let best = ''
   let bestWeight = -1
   for (const [id, weight] of Object.entries(speciesMix)) {
     if (weight <= bestWeight) continue
-    const code = species.get(id)?.surfaceFuelModel
+    const sp = species.get(id)
+    const code = sp?.surfaceFuelModel
     if (code === undefined || !FUEL_MODELS.has(code)) continue
+    // Ground cover is NOT a candidate for the stand's litter model, however heavily the mix
+    // weights it. `western-us-conifer` lists `festuca-arizonica: 1.0` above every tree in the
+    // stand, with a comment saying it is "weighted separately from the stem mix" — and this
+    // function took the maximum over the whole mix regardless. So a ponderosa/Douglas-fir
+    // forest has been burning as GR2, low-load dry-climate grass, instead of TL8 long-needle
+    // litter, for as long as the biome has existed. Nothing surfaced it because a uniform bed
+    // of GR2 is a perfectly plausible-looking grass fire.
+    if (sp?.form === 'grass' || sp?.form === 'fern') continue
     best = code
     bestWeight = weight
   }

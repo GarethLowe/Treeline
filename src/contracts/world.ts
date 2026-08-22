@@ -98,12 +98,15 @@ export const BIOME_IDS: readonly BiomeId[] = [
  * Species parameters. The fuel figures here are the SAME values the fire model consumes;
  * the mesh generator reads them to build geometry. They are not decoration.
  */
+/** Growth habit. `grass` and `fern` are ground cover, never a stand's litter model. */
+export type SpeciesForm = 'conifer' | 'broadleaf' | 'shrub' | 'grass' | 'fern'
+
 export interface SpeciesDef {
   readonly id: string
   readonly commonName: string
   readonly scientificName: string
   readonly biomes: readonly BiomeId[]
-  readonly form: 'conifer' | 'broadleaf' | 'shrub' | 'grass' | 'fern'
+  readonly form: SpeciesForm
 
   /** Mature height range. Individuals are sampled within it by age. */
   readonly heightM: readonly [Metres, Metres]

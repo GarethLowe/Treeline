@@ -197,6 +197,21 @@ async function build(stages: StageTracker): Promise<void> {
         stems: w.vegetation.stems,
         standCrownBulkDensity: w.vegetation.diagnostics.measuredStandCrownBulkDensity,
       },
+      // Per-cell fuel from the world's own cover, UNLESS the fuel model was set explicitly.
+      // An override means "burn this model", which is what a controlled comparison and every
+      // published benchmark want; leaving it off means "burn what is actually there".
+      ...(settings.fuelModel !== null
+        ? {}
+        : {
+            fuelMap: {
+              understory: w.vegetation.understory,
+              // What the open ground carries: the understory's own cover species, which is
+              // what `UnderstoryField` suppressed by shade to produce the cover fraction.
+              understoryFuelCode:
+                w.vegetation.understory.coverSpecies[0]?.surfaceFuelModel ??
+                dominantFuelModel(w.config.vegetation.speciesMix, w.vegetation.species),
+            },
+          }),
     })
     f.setWeather(weatherFromSettings(settings))
     f.timeScale = settings.fireTimeScale
@@ -307,6 +322,7 @@ async function build(stages: StageTracker): Promise<void> {
     } catch (err) {
       boot.appendBlock('M3 canopy chain probe', `FAILED: ${String(err)}`)
     }
+    boot.appendBlock('Surface fuel bed', fire.fuelBedReport())
     boot.setPhase('debug — checking 1x and 8x agree at equal simulated time')
     await yieldToBrowser()
     try {
@@ -633,7 +649,10 @@ async function probeClockEquivalence(): Promise<string> {
   const TARGET_S = 30
   const base = seconds(1 / 30)
 
-  const runAt = async (scale: number): Promise<{ burnt: number; ignited: number; t: number }> => {
+  const runAt = async (
+    scale: number,
+    baseDt: number = base as number,
+  ): Promise<{ burnt: number; ignited: number; t: number }> => {
     const previous = f.timeScale
     f.timeScale = scale
     f.reset()
@@ -644,10 +663,10 @@ async function probeClockEquivalence(): Promise<string> {
     f.ignite({ kind: 'point', x: centre, z: centre, radius: metres(15) })
     // Frames, not steps: `scale` substeps happen inside each one. Both runs therefore cover
     // TARGET_S of simulated time and differ only in how it is chopped up.
-    const frames = Math.round(TARGET_S / ((base as number) * scale))
+    const frames = Math.round(TARGET_S / (baseDt * scale))
     for (let i = 0; i < frames; i++) {
       const encoder = d.device.createCommandEncoder({ label: 'clock.equiv' })
-      const simDt = f.step(encoder, base)
+      const simDt = f.step(encoder, seconds(baseDt))
       c.step(encoder, simDt, f.outputs)
       smoke?.step(encoder, simDt, f.simTimeS)
       d.device.queue.submit([encoder.finish()])
@@ -667,6 +686,11 @@ async function probeClockEquivalence(): Promise<string> {
 
   const slow = await runAt(1)
   const fast = await runAt(8)
+  // Third run: the same simulated time at a COARSER substep. `DEFAULT_FIXED_DT` is 1/120 s
+  // against a spec asking 2-10 Hz, and `radiation/layout.ts` already records that as sixteen
+  // times what 7.4 wants. Substepping made cadence the dominant cost at high time scales, so
+  // whether it can be coarsened is now worth measuring rather than assuming either way.
+  const coarse = await runAt(1, 1 / 30)
 
   const rel = (a: number, b: number): number =>
     Math.max(a, b) <= 0 ? 0 : Math.abs(a - b) / Math.max(a, b)
@@ -689,12 +713,21 @@ async function probeClockEquivalence(): Promise<string> {
         ? 1
         : Infinity
       : Math.max(slow.ignited, fast.ignited) / Math.min(slow.ignited, fast.ignited)
+  // Too little canopy ignition to discriminate. Real once the fuel bed became heterogeneous:
+  // under TL8 litter the default fire barely crowns, so both runs report a couple of voxels
+  // and their ratio says nothing either way. Saying so beats reporting PASS on two samples.
+  const MIN_SAMPLE = 20
+  const inconclusive = Math.max(slow.ignited, fast.ignited) < MIN_SAMPLE
   const ok = burntRel <= TOL && ratio <= CANOPY_TOL
-  const verdict = ok
-    ? 'PASS — the two clocks agree, so timeScale changes how fast you watch and not what happens.'
-    : 'FAIL — the subsystems are on different clocks again. Check that every caller passes the ' +
+  const verdict = !ok
+    ? 'FAIL — the subsystems are on different clocks again. Check that every caller passes the ' +
       'time FireSim.step returns, and that the canopy and smoke substep it rather than ' +
       'swallowing the whole interval in one step.'
+    : inconclusive
+      ? `INCONCLUSIVE — under ${MIN_SAMPLE} canopy ignitions in either run, which is too few to ` +
+        'discriminate. The surface halves agree. Re-run with ?fuel=SB4&wind=6 for a fire that ' +
+        'actually crowns.'
+      : 'PASS — the two clocks agree, so timeScale changes how fast you watch and not what happens.'
 
   return [
     `clock equivalence same ignition run to ${TARGET_S} s of simulated time at two speeds`,
@@ -706,6 +739,9 @@ async function probeClockEquivalence(): Promise<string> {
       `— the SURFACE was never wrong at speed, so this alone cannot catch the bug`,
     `  canopy ignition ${ratio === Infinity ? 'one run ignited nothing' : `${ratio.toFixed(2)}x apart`} ` +
       `(tolerance ${CANOPY_TOL.toFixed(1)}x) — this is the measurement that discriminates`,
+    `  cadence         1/30 s substep gives ${coarse.burnt.toFixed(0)} m2 against ` +
+      `${slow.burnt.toFixed(0)} at 1/120, ${(rel(slow.burnt, coarse.burnt) * 100).toFixed(1)} % apart ` +
+      `— how much accuracy the current 120 Hz is buying`,
     verdict,
   ].join(String.fromCharCode(10))
 }

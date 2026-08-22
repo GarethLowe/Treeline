@@ -282,8 +282,8 @@ export function fireLines(f: FireHudFrame): readonly string[] {
         '  firebrands',
         f.firebrands.wired
           ? `${count(f.firebrands.airborne)} airborne, ${count(f.firebrands.landed)} landed`
-          : 'NOT WIRED — nothing calls setEmitters(), so WP 3.6 integrates an empty pool. ' +
-            'These zeros are not a measurement.',
+          : 'OFF — WP 3.6 is incomplete and not dispatched: nothing supplies it emitters and ' +
+            'nothing consumes its ignition mask. These zeros are not a measurement.',
       ),
       row('    spot fires', `${count(f.firebrands.ignitionsCaused)} caused`),
       row('    max spot', `${f.firebrands.maxSpotDistanceM.toFixed(0)} m`),
