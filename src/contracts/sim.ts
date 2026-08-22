@@ -68,12 +68,6 @@ export interface FuelModel {
   readonly heatContent: KilojoulesPerKg
 }
 
-export interface IFuelModelTable {
-  get(code: string): FuelModel
-  readonly codes: readonly string[]
-  has(code: string): boolean
-}
-
 // ---------------------------------------------------------------------------
 // Rothermel — the pure kernel (WP 2.1), which is the oracle for the WGSL port (WP 2.2)
 // ---------------------------------------------------------------------------
@@ -152,16 +146,6 @@ export interface SurfaceWeather {
   readonly moisture: Readonly<Record<FuelSizeClass, MoistureFraction>>
 }
 
-export interface ISurfaceSolver {
-  /** Fixed timestep. The solver substeps internally to satisfy CFL; see spec §4.7. */
-  step(encoder: GPUCommandEncoder, dt: Seconds, weather: SurfaceWeather): void
-  ignite(shape: IgnitionShape): void
-  reset(): void
-  /** Number of cells currently burning — drives indirect dispatch, and is worth showing. */
-  readonly activeCellCount: number
-  readonly outputs: IFireOutputs
-}
-
 /**
  * Fields the renderer, the canopy module (M3) and the measurement HUD (M6) all read.
  * Exposed as textures because every consumer is on the GPU.
@@ -229,7 +213,6 @@ export interface CrownFireState {
   /** Fraction of crown fuel consumed, 0-1. */
   readonly crownFractionBurned: number
 }
-
 
 /** One airborne firebrand. WP 3.6 owns the GPU buffer layout. */
 export interface FirebrandStats {

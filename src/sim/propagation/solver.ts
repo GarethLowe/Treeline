@@ -32,7 +32,6 @@
 
 import type {
   IFireOutputs,
-  ISurfaceSolver,
   IgnitionShape,
   SurfaceWeather,
 } from '@contracts/sim'
@@ -66,7 +65,7 @@ export interface SurfaceSolverOptions {
   readonly useSubgroups?: boolean
 }
 
-export class SurfaceSolver implements ISurfaceSolver {
+export class SurfaceSolver {
   readonly cells: number
   readonly cellM: number
 

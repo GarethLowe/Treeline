@@ -11,7 +11,7 @@
  * Spec: docs/spec/50-meteorology.md §6.5; contract: `src/contracts/render.ts`.
  */
 
-import type { CameraState, ISkyRenderer, SolarState, TimeOfDay } from '@contracts/render.ts'
+import type { CameraState, SolarState, TimeOfDay } from '@contracts/render.ts'
 import { K } from '@contracts/units.ts'
 import {
   computeSolarState,
@@ -67,7 +67,7 @@ interface Solve {
   readonly full: FullSolarState
 }
 
-export class SkyRenderer implements ISkyRenderer {
+export class SkyRenderer {
   readonly device: GPUDevice
   readonly uniformBuffer: GPUBuffer
   readonly bindGroupLayout: GPUBindGroupLayout

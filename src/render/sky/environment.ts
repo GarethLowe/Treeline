@@ -16,7 +16,7 @@
  * said the sky was delivering.
  */
 
-import type { IEnvironmentLighting, SolarState } from '@contracts/render.ts'
+import type { SolarState } from '@contracts/render.ts'
 import {
   environmentRadiance,
   packSkyUniforms,
@@ -69,7 +69,7 @@ interface BuiltFrom {
   readonly turbidity: number
 }
 
-export class EnvironmentLighting implements IEnvironmentLighting {
+export class EnvironmentLighting {
   readonly device: GPUDevice
   readonly irradianceSH: GPUBuffer
   readonly specularCube: GPUTexture

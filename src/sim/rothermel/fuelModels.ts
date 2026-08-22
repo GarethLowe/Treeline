@@ -16,7 +16,7 @@
  * that way rather than being round-tripped through English units for cosmetic uniformity.
  */
 
-import type { FuelSizeClass, FuelModel, FuelModelType, IFuelModelTable } from '@contracts/sim.ts'
+import type { FuelSizeClass, FuelModel, FuelModelType } from '@contracts/sim.ts'
 import type { Feet, KgPerSquareMetre, PerFoot, PerMetre } from '@contracts/units.ts'
 import {
   FACTORS,
@@ -263,7 +263,7 @@ const BY_CODE = new Map<string, FuelModel>(ENTRIES.map((f) => [f.code, f]))
   BY_CODE.set(gorse.code, gorse)
 }
 
-class FuelModelTable implements IFuelModelTable {
+export class FuelModelTable {
   readonly codes: readonly string[] = ENTRIES.map((f) => f.code)
 
   get(code: string): FuelModel {
@@ -292,7 +292,7 @@ export const FUEL_SIZE_CLASS_ORDER: readonly FuelSizeClass[] = [
   'liveWoody',
 ]
 
-export const FUEL_MODELS: IFuelModelTable = new FuelModelTable()
+export const FUEL_MODELS = new FuelModelTable()
 
 /** All entries, for sweeps and for the HUD's model picker. */
 export const ALL_FUEL_MODELS: readonly FuelModel[] = ENTRIES

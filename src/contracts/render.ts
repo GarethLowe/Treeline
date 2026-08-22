@@ -1,10 +1,12 @@
 /**
  * Rendering contracts: materials, foliage, sky, cameras.
  *
- * FROZEN for M1. Do not edit during fan-out.
+ * What belongs here is a type two packages both have to agree on. What does NOT belong here is
+ * an interface naming a single class — those were an artefact of building against frozen
+ * contracts during a parallel fan-out that ended with M1, and CLEANUP-SPEC 1.7 listed them for
+ * deletion. Add a concrete type and import it.
  */
 
-import type { QualitySettings } from './gpu.ts'
 import type { Kelvin, Metres, Radians, Seconds } from './units.ts'
 
 // ---------------------------------------------------------------------------
@@ -58,13 +60,6 @@ export interface FoliageStats {
   readonly grassBladesDrawn: number
 }
 
-export interface IFoliageRenderer {
-  /** GPU-driven culling and LOD selection. Runs before the draw. */
-  cull(encoder: GPUCommandEncoder, camera: CameraState, quality: QualitySettings): void
-  draw(pass: GPURenderPassEncoder, camera: CameraState, quality: QualitySettings): void
-  readonly stats: FoliageStats
-}
-
 // ---------------------------------------------------------------------------
 // Sky, sun and environment lighting (WP 1.7)
 // ---------------------------------------------------------------------------
@@ -94,26 +89,6 @@ export interface TimeOfDay {
   readonly dayOfYear: number
 }
 
-export interface ISkyRenderer {
-  /** Acceptance: matches an ephemeris within 0.1 degrees for a given date/lat/lon. */
-  solarState(time: TimeOfDay, latitudeDeg: number, longitudeDeg: number): SolarState
-  render(pass: GPURenderPassEncoder, camera: CameraState, solar: SolarState): void
-  /**
-   * Set at M4 when the smoke column occludes the sun. M1 implements the plumbing and
-   * leaves it at zero, so the M4 package does not have to reopen this contract.
-   */
-  setPlumeOpticalDepth(tau: number): void
-}
-
-export interface IEnvironmentLighting {
-  /** Diffuse irradiance SH, updated as the sun moves. */
-  readonly irradianceSH: GPUBuffer
-  /** Prefiltered specular environment. */
-  readonly specularCube: GPUTexture
-  update(encoder: GPUCommandEncoder, solar: SolarState): void
-  readonly bindGroupLayout: GPUBindGroupLayout
-}
-
 // ---------------------------------------------------------------------------
 // Cameras (WP 1.8)
 // ---------------------------------------------------------------------------
@@ -136,7 +111,6 @@ export interface CameraState {
 }
 
 export type CameraMode = 'first-person' | 'free'
-
 
 // ---------------------------------------------------------------------------
 // Frame assembly

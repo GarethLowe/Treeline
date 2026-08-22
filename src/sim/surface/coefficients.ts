@@ -20,9 +20,9 @@
  * except at biome boundaries — so it lands in the same caches a uniform would.
  */
 
-import type { IFuelModelTable } from '@contracts/sim'
 import { buildCoefficients } from './rothermel.ts'
 import type { RothermelCoefficients } from './rothermel.ts'
+import type { FuelModelTable } from '@sim/rothermel/fuelModels.ts'
 import { NON_BURNABLE_ID } from '@sim/rothermel/fuelModels.ts'
 
 /** Cure bins per fuel model. 16 gives 6.7% resolution in cure, well under the noise in it. */
@@ -118,7 +118,7 @@ export function packCoefficients(c: RothermelCoefficients, out: Float32Array, at
  * state, so it must be stable for a given world — it is derived from `table.codes`, which
  * WP 2.1 will supply in a fixed order.
  */
-export function buildCoefficientLut(table: IFuelModelTable): CoefficientLut {
+export function buildCoefficientLut(table: FuelModelTable): CoefficientLut {
   const order = ['<non-burnable>', ...table.codes]
   const recordCount = order.length * CURE_BINS
   const data = new Float32Array(recordCount * COEFF_FLOATS)

@@ -24,7 +24,7 @@
  *   Both are marked here rather than stubbed to return zeros.
  */
 
-import type { CameraState, FoliageStats, IFoliageRenderer, IMaterialSystem } from '@contracts/render'
+import type { CameraState, FoliageStats, IMaterialSystem } from '@contracts/render'
 import type { QualitySettings } from '@contracts/gpu'
 import type { ITreeMeshSet, IVegetationSet } from '@contracts/world'
 import { DOMAIN_SIZE_M } from '@contracts/world'
@@ -159,7 +159,7 @@ function emptyBuffer(
   return device.createBuffer({ label, size: Math.max(4, Math.ceil(size / 4) * 4), usage })
 }
 
-export class FoliageRenderer implements IFoliageRenderer {
+export class FoliageRenderer {
   readonly scene: FoliageScene
   readonly config: FoliageConfig
 
