@@ -83,11 +83,13 @@ function harness(options: FrameLoopOptions = {}): Harness {
 }
 
 describe('construction', () => {
-  it('defaults to h = 1/120 s and A_max = 4h, per spec §6.3 and §6.5', () => {
+  it('defaults to h = 1/30 s and A_max = 4h, per spec §6.5', () => {
+    // 1/120 until 2026-08-21, when `probeClockEquivalence` measured what it bought: 0.3 % of
+    // burnt area over 1/30 for four times the work. See DEFAULT_FIXED_DT for the numbers.
     const loop = new FrameLoop()
-    expect(loop.fixedDt).toBeCloseTo(1 / 120, 15)
+    expect(loop.fixedDt).toBeCloseTo(1 / 30, 15)
     expect(loop.maxSubstepsPerFrame).toBe(4)
-    expect(DEFAULT_MAX_SUBSTEPS * DEFAULT_FIXED_DT).toBeCloseTo(0.03333, 5)
+    expect(DEFAULT_MAX_SUBSTEPS * DEFAULT_FIXED_DT).toBeCloseTo(4 / 30, 5)
   })
 
   it('rejects a non-positive step or a fractional substep cap', () => {
@@ -120,18 +122,19 @@ describe('the accumulator', () => {
     const h = harness()
     h.advance(0)
     for (let i = 0; i < 60; i++) h.advance(25)
-    expect(h.steps).toHaveLength(180) // 1.5 s / (1/120 s)
+    expect(h.steps).toHaveLength(Math.round(1.5 / H)) // 1.5 s of wall time at the default h
     expect(h.loop.simTime).toBeCloseTo(1.5, 9)
   })
 
-  it('runs about two substeps per frame at 60 fps', () => {
+  it('reaches one second of simulated time after one second of 60 fps frames', () => {
     const h = harness()
     h.advance(0)
     for (let i = 0; i < 60; i++) h.advance(1000 / 60)
-    // 1/60 s is not exact in binary, so the 120th step may land on either side of the last
+    // 1/60 s is not exact in binary, so the last step may land on either side of the final
     // frame boundary. Anything outside +/-1 is an accumulator bug, not rounding.
-    expect(h.steps.length).toBeGreaterThanOrEqual(119)
-    expect(h.steps.length).toBeLessThanOrEqual(120)
+    const expected = Math.round(1.0 / H)
+    expect(h.steps.length).toBeGreaterThanOrEqual(expected - 1)
+    expect(h.steps.length).toBeLessThanOrEqual(expected)
     expect(h.loop.simTime).toBeCloseTo(1.0, 2)
   })
 
@@ -144,7 +147,10 @@ describe('the accumulator', () => {
   })
 
   it('carries the residue: three 4 ms frames produce one 8.33 ms step', () => {
-    const h = harness()
+    // Pinned at 1/120 rather than the default: this asserts hand-computed residue arithmetic
+    // and wants a step SMALLER than the frames feeding it. The accumulator is what is under
+    // test here, not whatever cadence the app currently ships.
+    const h = harness({ fixedDt: 1 / 120 })
     h.advance(0)
     h.advance(4)
     expect(h.steps).toHaveLength(0)
@@ -153,7 +159,7 @@ describe('the accumulator', () => {
     expect(h.steps).toHaveLength(0)
     h.advance(4)
     expect(h.steps).toHaveLength(1)
-    expect(h.loop.accumulator).toBeCloseTo(0.012 - H, 9)
+    expect(h.loop.accumulator).toBeCloseTo(0.012 - 1 / 120, 9)
   })
 
   it('simTime equals the number of steps times h, exactly', () => {
@@ -195,9 +201,10 @@ describe('frame-rate independence (spec §6.5)', () => {
     for (let i = 0; i < 60; i++) mid.advance(25)
     for (let i = 0; i < 30; i++) slow.advance(50)
 
-    expect(fast.steps).toHaveLength(180)
-    expect(mid.steps).toHaveLength(180)
-    expect(slow.steps).toHaveLength(180)
+    const expected = Math.round(1.5 / H)
+    expect(fast.steps).toHaveLength(expected)
+    expect(mid.steps).toHaveLength(expected)
+    expect(slow.steps).toHaveLength(expected)
     expect(fast.loop.simTime).toBeCloseTo(slow.loop.simTime, 12)
     expect(mid.loop.simTime).toBeCloseTo(slow.loop.simTime, 12)
     for (const h of [fast, mid, slow]) expect(h.loop.droppedSimTime).toBe(0)
@@ -216,6 +223,9 @@ describe('frame-rate independence (spec §6.5)', () => {
   })
 })
 
+// The three cases below count substeps produced by frames of a few tens of milliseconds, so
+// they pin h at 1/120 to keep those counts hand-checkable. They are about the clamp, the pause
+// and the per-frame report — not about the cadence the app ships.
 describe('the spiral-of-death clamp', () => {
   it('caps a stalled frame at maxSubstepsPerFrame and reports the dropped time', () => {
     const dropped: number[] = []
@@ -229,7 +239,8 @@ describe('the spiral-of-death clamp', () => {
   })
 
   it('does not compound: the frame after a stall is normal again', () => {
-    const h = harness()
+    // Also pinned at 1/120, so that a 25 ms frame is worth a countable three steps.
+    const h = harness({ fixedDt: 1 / 120 })
     h.advance(0)
     h.advance(500)
     const afterStall = h.steps.length
@@ -250,7 +261,7 @@ describe('the spiral-of-death clamp', () => {
   })
 
   it('a larger substep cap absorbs a bigger hitch without dropping time', () => {
-    const h = harness({ maxSubstepsPerFrame: 32 })
+    const h = harness({ maxSubstepsPerFrame: 32, fixedDt: 1 / 120 })
     h.advance(0)
     h.advance(200)
     expect(h.steps).toHaveLength(24) // 0.2 s / (1/120 s)
@@ -307,7 +318,7 @@ describe('paused', () => {
   })
 
   it('does not bank paused wall time and release it on resume', () => {
-    const h = harness()
+    const h = harness({ fixedDt: 1 / 120 })
     h.advance(0)
     h.loop.paused = true
     for (let i = 0; i < 60; i++) h.advance(16)
@@ -395,7 +406,7 @@ describe('clock hygiene', () => {
   })
 
   it('reports the substep count of the most recent frame', () => {
-    const h = harness()
+    const h = harness({ fixedDt: 1 / 120 })
     h.advance(0)
     h.advance(25)
     expect(h.loop.lastSubstepCount).toBe(3)

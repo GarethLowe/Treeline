@@ -82,8 +82,13 @@ describe('frame orchestration', () => {
       },
     )
     scheduler.fire(1000)
-    scheduler.fire(1025) // 25 ms
-    expect(steps).toHaveLength(3) // 25 ms / (1/120 s)
+    // Enough wall time to be worth a countable number of substeps at whatever the shipping
+    // cadence is. Derived rather than hand-written: this test is about the orchestration
+    // being deterministic, not about the value of h, and it went red for the wrong reason
+    // when h moved 1/120 -> 1/30.
+    const frameMs = DEFAULT_FIXED_DT * 3 * 1000
+    scheduler.fire(1000 + frameMs)
+    expect(steps).toHaveLength(3)
     expect(renders).toBe(2)
     for (const dt of steps) expect(dt).toBe(DEFAULT_FIXED_DT)
     runtime.stop()
@@ -114,8 +119,11 @@ describe('the invariant that spans the whole package', () => {
       (dt) => stepsAtFull.push(dt),
       () => {},
     )
+    // Two equal intervals, each worth a whole number of substeps at the shipping cadence, so
+    // the "quality changed nothing" comparison is between two identical amounts of physics.
+    const intervalMs = DEFAULT_FIXED_DT * 6 * 1000
     scheduler.fire(1000)
-    scheduler.fire(1050) // 50 ms
+    scheduler.fire(1000 + intervalMs)
     const dtBefore = runtime.loop.fixedDt
     const maxSubBefore = runtime.loop.maxSubstepsPerFrame
     const simBefore = runtime.loop.simTime
@@ -125,10 +133,10 @@ describe('the invariant that spans the whole package', () => {
     expect(runtime.quality.isDegraded).toBe(true)
 
     const countBefore = stepsAtFull.length
-    scheduler.fire(1100) // another 50 ms
+    scheduler.fire(1000 + intervalMs * 2)
     expect(runtime.loop.fixedDt).toBe(dtBefore)
     expect(runtime.loop.maxSubstepsPerFrame).toBe(maxSubBefore)
-    // 50 ms at h = 1/120 s is six substeps whether we are rendering at 0.6 scale or 1.0.
+    // Six substeps' worth of wall time is six substeps whether we render at 0.6 scale or 1.0.
     expect(stepsAtFull.length - countBefore).toBe(6)
     expect(runtime.loop.simTime - simBefore).toBeCloseTo(6 * DEFAULT_FIXED_DT, 12)
     for (const dt of stepsAtFull) expect(dt).toBe(DEFAULT_FIXED_DT)

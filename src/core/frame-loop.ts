@@ -23,8 +23,26 @@
 import type { Seconds } from '@contracts/units'
 import { s as seconds } from '@contracts/units'
 
-/** Base substep from spec §6.3: h = 1/120 s = 8.333 ms. */
-export const DEFAULT_FIXED_DT = 1 / 120
+/**
+ * Base substep: h = 1/30 s = 33.3 ms.
+ *
+ * Spec §6.3 wrote 1/120 s, and the revised overview asks for 2-10 Hz on a 0.5 m grid;
+ * `sim/canopy/radiation/layout.ts` has recorded the gap as "sixteen times what §7.4 asks for"
+ * for some time. It was left alone because nobody had measured what it bought.
+ *
+ * Now measured, by `probeClockEquivalence` on a real GPU: the same ignition run to 30 s of
+ * simulated time gives 2013 m2 burnt at 1/30 s against 2019 m2 at 1/120 s — **0.3 % apart for
+ * four times the work**. CFL is not close either; SB4 at 6 m/s spreads 1.23 m/s, so a 1/30 s
+ * step moves the front 0.041 m across 0.5 m cells.
+ *
+ * This matters more than it did: substepping the canopy and the smoke onto the fire's clock
+ * made cadence the dominant cost at high time scales, where it multiplies. Still three times
+ * finer than the overview's upper bound, so there is room left if it is ever wanted.
+ *
+ * The probe prints the 1/30-vs-1/120 comparison on every `?debug` run, so this stays a
+ * measured choice rather than a number someone once wrote down.
+ */
+export const DEFAULT_FIXED_DT = 1 / 30
 
 /** A_max = 4h = 33.3 ms, per spec §6.5. */
 export const DEFAULT_MAX_SUBSTEPS = 4
